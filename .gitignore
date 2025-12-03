@@ -30,3 +30,5 @@ colcon_ws/log/
 # Generated data
 scene_snapshots/
 _out_random_cylinders/
+dataset_logs
+code_logs
