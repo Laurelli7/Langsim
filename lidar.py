@@ -8,7 +8,7 @@ extensions.enable_extension("isaacsim.ros2.bridge")
 
 
 LIDAR_PRIM_PATH = "/World/turtlebot4/rplidar_link/Lidar"  # your lidar
-LIDAR_GRAPH_PATH = "/LidarROS2Graph"
+LIDAR_GRAPH_PATH = "/World/LidarROS2Graph"
 
 
 def publish_physx_lidar_scan(

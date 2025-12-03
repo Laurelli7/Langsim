@@ -174,7 +174,7 @@ def publish_camera_tf(camera: Camera):
         raise ValueError(f"Camera path '{camera_prim}' is invalid.")
 
     camera_frame_id = camera_prim.split("/")[-1]
-    ros_camera_graph_path = "/CameraTFActionGraph"
+    ros_camera_graph_path = "/World/CameraTFActionGraph"
 
     if not is_prim_path_valid(ros_camera_graph_path):
         (ros_camera_graph, _, _, _) = og.Controller.edit(
