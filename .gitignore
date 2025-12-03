@@ -1,0 +1,32 @@
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+venv/
+.env/
+.env*/
+
+# VS Code settings
+.vscode/
+*.code-workspace
+
+# --- ROS2 build artifacts ---
+build/
+install/
+log/
+
+# Colcon/ROS2
+colcon_ws/log/
+.colcon/
+
+# Cache / temp
+*.DS_Store
+*.swp
+*.swo
+
+# Generated data
+scene_snapshots/
+_out_random_cylinders/
