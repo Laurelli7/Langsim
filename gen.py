@@ -1,26 +1,25 @@
-# random_cylinders_sdg.py
-# Static baked scenes with cylinders already in place (no SDG when opening USD)
+# random_cylinders_sdg_with_robot_randomization.py
+# Static baked scenes with cylinders and a randomized TurtleBot4 pose (no SDG when opening USD)
 
 from isaacsim import SimulationApp
 import os
-import json  # <--- NEW
+import json
 
 CONFIG = {
     "launch_config": {"renderer": "RayTracedLighting", "headless": False},
     "scene_path": "/home/dotin13/isaac-proj/tb4.usd",
-
     "resolution": [640, 480],
     "num_frames": 50,
     "rt_subframes": 8,
-
+    # Area for randomizing cylinders (and robot XY)
     "spawn_area": {
-        "xmin": -2.0, "xmax": 2.0,
-        "ymin": -2.0, "ymax": 2.0,
-        "z": 0.00,
+        "xmin": -3.7,
+        "xmax": 3.7,
+        "ymin": -3.7,
+        "ymax": 3.7,
+        "z": -0.25,
     },
-
     "objects_per_frame": 3,
-
     "writer_config": {
         "output_dir": "_out_random_cylinders",
         "rgb": True,
@@ -28,8 +27,14 @@ CONFIG = {
         "bounding_box_3d": True,
         "bounding_box_2d_tight": True,
     },
-
     "scene_snapshot_dir": "/home/dotin13/isaac-proj/scene_snapshots",
+
+    # Existing cameras in the scene
+    "world_cam_prim": "/World/Camera",
+    "tb_cam_prim": "/World/turtlebot4/oakd_link/Camera",
+
+    # Robot prim to randomize
+    "robot_prim": "/World/turtlebot4",
 }
 
 simulation_app = SimulationApp(CONFIG["launch_config"])
@@ -38,6 +43,7 @@ import omni.usd
 import omni.replicator.core as rep
 from pxr import Gf, Usd, UsdGeom, UsdShade
 import carb
+
 
 # ----------------------------------------
 # Load scene
@@ -53,34 +59,48 @@ def load_scene(path):
     return stage
 
 
-stage = load_scene(CONFIG["scene_path"])
-
-
 # ----------------------------------------
-# Camera & writer
+# Camera & writer: only /World/Camera and TB4 cam
 # ----------------------------------------
-def setup_camera_and_writer(config):
-    cam = rep.create.camera(
-        position=(0.0, -3.5, 1.2),
-        rotation=(0, 0, 0),
-        focal_length=24,
-        name="MainCam",
-    )
+def setup_cameras_and_writer(config):
+    render_products = []
 
-    rp = rep.create.render_product(cam, config["resolution"])
+    world_cam_path = config.get("world_cam_prim")
+    tb_cam_path = config.get("tb_cam_prim")
 
+    # World camera
+    if world_cam_path:
+        rp_world = rep.create.render_product(world_cam_path, config["resolution"])
+        render_products.append(rp_world)
+        print(f"[Camera] Using world camera at: {world_cam_path}")
+    else:
+        print("[Camera] WARNING: no world_cam_prim configured")
+
+    # Turtlebot camera
+    if tb_cam_path:
+        rp_tb = rep.create.render_product(tb_cam_path, config["resolution"])
+        render_products.append(rp_tb)
+        print(f"[Camera] Using turtlebot camera at: {tb_cam_path}")
+    else:
+        print("[Camera] WARNING: no tb_cam_prim configured")
+
+    if not render_products:
+        carb.log_error("[Camera] No render products created! Check camera prim paths.")
+        simulation_app.close()
+        raise SystemExit
+
+    # Ensure writer output path is absolute
     outdir = config["writer_config"]["output_dir"]
     if not os.path.isabs(outdir):
         config["writer_config"]["output_dir"] = os.path.join(os.getcwd(), outdir)
 
+    print(f"[Writer] Output dir: {config['writer_config']['output_dir']}")
+
     writer = rep.WriterRegistry.get("BasicWriter")
     writer.initialize(**config["writer_config"])
-    writer.attach([rp])
+    writer.attach(render_products)
 
-    return cam, rp
-
-
-camera, render_product = setup_camera_and_writer(CONFIG)
+    return render_products
 
 
 # ----------------------------------------
@@ -99,9 +119,7 @@ def strip_replicator_graph_from_file(usd_path):
     for prim in stage.Traverse():
         name = prim.GetName().lower()
         type_name = prim.GetTypeName().lower()
-        if (
-            "sdg" in name
-        ):
+        if "sdg" in name:
             to_remove.append(prim.GetPath())
 
     # Remove from deepest to highest so children go first
@@ -138,7 +156,9 @@ def collect_cylinder_ground_truth(stage):
                 pos = world_mat.ExtractTranslation()
                 position = [float(pos[0]), float(pos[1]), float(pos[2])]
             except Exception as e:
-                carb.log_warn(f"[GT] Failed to get world transform for {prim.GetPath()}: {e}")
+                carb.log_warn(
+                    f"[GT] Failed to get world transform for {prim.GetPath()}: {e}"
+                )
                 position = [0.0, 0.0, 0.0]
 
             # Try to get bound material and its OmniPBR base color
@@ -166,7 +186,9 @@ def collect_cylinder_ground_truth(stage):
                                 color = [float(val[0]), float(val[1]), float(val[2])]
             except Exception as e:
                 # Don't kill the run if GT color fails; just leave color=None
-                carb.log_warn(f"[GT] Failed to read material color for {prim.GetPath()}: {e}")
+                carb.log_warn(
+                    f"[GT] Failed to read material color for {prim.GetPath()}: {e}"
+                )
 
             gt.append(
                 {
@@ -201,53 +223,108 @@ def save_ground_truth_for_snapshot(stage, frame_index, snapshot_filename, out_di
 
 
 # ----------------------------------------
-# Random cylinder generator (correct API)
+# Create cylinders ONCE in the scene
 # ----------------------------------------
-def register_cylinder_randomizer(config):
+def create_cylinders(config):
+    area = config["spawn_area"]
+    count = config["objects_per_frame"]
+
+    with rep.create.cylinder(
+        count=count,
+        position=rep.distribution.uniform(
+            (area["xmin"], area["ymin"], area["z"]),
+            (area["xmax"], area["ymax"], area["z"]),
+        ),
+        scale=rep.distribution.uniform(
+            (0.05, 0.05, 1.0),
+            (0.15, 0.15, 1.0),
+        ),
+        rotation=rep.distribution.uniform((0.0, 0.0, 0.0), (0.0, 0.0, 360.0)),
+        semantics={"class": "Cylinder"},
+        name="training_cylinder",
+        as_mesh=True,
+        visible=True,
+    ) as cylinders:
+
+        rep.physics.collider(approximation_shape="convexHull")
+        rep.physics.rigid_body()
+
+    # IMPORTANT: we just created them once; we'll randomize them later
+    return cylinders
+
+
+# ----------------------------------------
+# Randomize pose + material of EXISTING cylinders
+# ----------------------------------------
+def register_cylinder_randomizer(config, cylinders):
 
     area = config["spawn_area"]
     count = config["objects_per_frame"]
 
-    def spawn_cylinders():
-
-        cylinders = rep.create.cylinder(
-            count=count,
-            position=rep.distribution.uniform(
-                (area["xmin"], area["ymin"], area["z"]),
-                (area["xmax"], area["ymax"], area["z"]),
-            ),
-            scale=rep.distribution.uniform(
-                (0.05, 0.05, 1.0),
-                (0.15, 0.15, 1.0),
-            ),
-            rotation=rep.distribution.uniform((0.0, 0.0, 0.0), (0.0, 0.0, 360.0)),
-            semantics={"class": "Cylinder"},
-            name="training_cylinder",
-            as_mesh=True,
-            visible=True,
-        )
-
-        # Random colors + physics
+    def randomize_existing_cylinders():
+        # Reposition, re-rotate, re-scale, recolor the same cylinders each frame
         with cylinders:
-            rep.randomizer.materials(
-                rep.create.material_omnipbr(
-                    diffuse=rep.distribution.uniform(
-                        (0.0, 0.0, 0.0),
-                        (1.0, 1.0, 1.0),
-                    )
-                )
+            rep.modify.pose(
+                position=rep.distribution.uniform(
+                    (area["xmin"], area["ymin"], area["z"]),
+                    (area["xmax"], area["ymax"], area["z"]),
+                ),
+                rotation=rep.distribution.uniform(
+                    (0.0, 0.0, 0.0),
+                    (0.0, 0.0, 360.0),
+                ),
+                scale=rep.distribution.uniform(
+                    (0.05, 0.05, 1.0),
+                    (0.15, 0.15, 1.0),
+                ),
             )
-            rep.physics.collider(approximation_shape="convexHull")
-            rep.physics.rigid_body()
+            mats = rep.create.material_omnipbr(
+                diffuse=rep.distribution.uniform(
+                    (0.0, 0.0, 0.0),
+                    (1.0, 1.0, 1.0),
+                ),
+                count=count,
+            )
+            rep.randomizer.materials(mats)
 
         return cylinders.node
 
-    rep.randomizer.register(spawn_cylinders)
+    rep.randomizer.register(randomize_existing_cylinders)
+
+
+# ----------------------------------------
+# Randomize pose (position + yaw) of TurtleBot4 robot
+# ----------------------------------------
+def register_robot_randomizer(config, stage):
+
+    robot_path = config.get("robot_prim", "/World/turtlebot4")
+    area = config["spawn_area"]
+
+    def randomize_robot_pose():
+        # Randomize robot XY and yaw, keep Z constant
+        robot_prims = rep.get.prim_at_path(robot_path)
+        with robot_prims:
+            rep.modify.pose(
+                position=rep.distribution.uniform(
+                    (area["xmin"], area["ymin"], -0.75),
+                    (area["xmax"], area["ymax"], -0.7),
+                ),
+                # Only yaw around Z; roll/pitch remain zero
+                rotation=rep.distribution.uniform(
+                    (0.0, 0.0, 0.0),
+                    (0.0, 0.0, 360.0),
+                ),
+            )
+
+        return robot_prims.node
+
+    rep.randomizer.register(randomize_robot_pose)
 
 
 # ----------------------------------------
 # Create a base scene in snapshot dir (fixes TB4 relative paths)
 # ----------------------------------------
+stage = load_scene(CONFIG["scene_path"])
 os.makedirs(CONFIG["scene_snapshot_dir"], exist_ok=True)
 
 new_scene_path = os.path.join(CONFIG["scene_snapshot_dir"], "base_scene.usd")
@@ -257,19 +334,28 @@ print(f"[Scene] Saved base scene: {new_scene_path}")
 # After save_as_stage, the context now points to base_scene.usd
 stage = omni.usd.get_context().get_stage()
 
+# Set up cameras & writer on the base scene:
+render_products = setup_cameras_and_writer(CONFIG)
+
+# Create cylinders once
+cylinders = create_cylinders(CONFIG)
+
+# Register randomizers
+register_cylinder_randomizer(CONFIG, cylinders)
+register_robot_randomizer(CONFIG, stage)
+
 # ----------------------------------------
 # Register SDG and run per-frame
 # ----------------------------------------
-register_cylinder_randomizer(CONFIG)
-
 with rep.trigger.on_frame():
-    rep.randomizer.spawn_cylinders()
+    rep.randomizer.randomize_existing_cylinders()
+    rep.randomizer.randomize_robot_pose()
 
 print(f"[SDG] Generating {CONFIG['num_frames']} frames")
 
 for i in range(CONFIG["num_frames"]):
     # Run randomizers + writers for this frame
-    rep.orchestrator.step(rt_subframes=CONFIG["rt_subframes"], delta_time=0.0)
+    rep.orchestrator.step(rt_subframes=CONFIG["rt_subframes"], delta_time=1.0 / 60.0)
 
     # Use a consistent name for snapshot
     snapshot_filename = f"scene_{i:04d}.usd"
