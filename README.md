@@ -8,8 +8,8 @@ The pipeline operates in two distinct phases:
 
 1.  **Offline Scene Baking:** We programmatically generate randomized USD stages containing a TurtleBot4, random cylindrical targets, and ground truth metadata. These scenes are "baked" (dynamic graphs stripped) to ensure deterministic loading during simulation.
 2.  **Online Data Generation (The "Game"):** An autonomous loop where two AI Agents interact:
-      * **Human Oracle (GPT-4o):** Has a top-down "God view" of the map and the target. It gives natural language hints to the robot.
-      * **Planner Agent (GPT-4o):** Acts as the robot. It sees only the ego-centric camera view and the human's hint. It outputs executable ROS 2 code to move the robot.
+      * **Human Oracle:** Has a top-down "God view" of the map and the target. It gives natural language hints to the robot.
+      * **Planner Agent:** Acts as the robot. It sees only the ego-centric camera view and the human's hint. It outputs executable ROS 2 code to move the robot.
 
 ## 2\. File Descriptions
 
@@ -67,7 +67,7 @@ Run the randomizer to create a batch of 50 static scenarios.
 
 ```bash
 # Ensure you are in the Isaac Sim python environment
-./python.sh random_cylinders_sdg_with_robot_randomization.py
+./python.sh gen.py
 ```
 
 *Output:* Checks `scene_snapshots/` for `scene_0000.usd`, `scene_0000_gt.json`, etc.
@@ -81,14 +81,14 @@ export OPENAI_API_KEY="sk-..."
 export TOPIC_CMD_VEL="/cmd_vel"
 
 # Run the simulation app
-./python.sh gen.py
+./python.sh langsim.py
 ```
 
 *Output:* The robot will load a scene, ask for help, receive a hint, generate code, and move. Logs are saved to `dataset_logs/`.
 
 ## 4\. Dataset Output Format
 
-The `gen.py` script produces a `log_{id}.json` file for every episode containing the chain-of-thought data required for fine-tuning:
+The `langsim.py` script produces a `log_{id}.json` file for every episode containing the chain-of-thought data required for fine-tuning:
 
 ```json
 {
