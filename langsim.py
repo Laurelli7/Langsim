@@ -105,7 +105,7 @@ def get_color_name(rgb_vector):
 def encode_image_to_base64(numpy_img):
     if numpy_img.shape[-1] == 4:
         numpy_img = numpy_img[:, :, :3]
-    
+
     # Ensure contiguous array for Pillow (OpenCV can disrupt this)
     numpy_img = np.ascontiguousarray(numpy_img)
     img = Image.fromarray(numpy_img)
@@ -189,7 +189,7 @@ if __name__ == '__main__':
             "You are a Robot Planner using ROS 2. "
             f"GOAL: {goal_description}. "
             "DECISION PROTOCOL:\n"
-            "1. IF you think you still need extra information or human help: Ask for a hint.\n"
+            "1. IF you think you still need extra information or human help: Describe your problem in one sentence and ask for help in another.\n"
             "2. IF you know how to move based on the camera view or human hint: Output Python code using ```python ... ```.\n"
             f"   Use this template:\n{self.code_template}"
         )
@@ -203,20 +203,22 @@ if __name__ == '__main__':
             messages.append({"role": "user", "content": human_hint})
             self.history.append({"role": "user", "content": human_hint})
         else:
-            messages.append({
-                "role": "user",
-                "content": [
-                    {"type": "input_text", "text": "Current camera view."},
-                    {"type": "input_image", "image_url": f"data:image/jpeg;base64,{ego_image_b64}"},
-                ]
-            })
-            
+            messages.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "Current camera view."},
+                        {
+                            "type": "input_image",
+                            "image_url": f"data:image/jpeg;base64,{ego_image_b64}",
+                        },
+                    ],
+                }
+            )
+
         print(messages)
 
-        response = OPENAI_CLIENT.responses.create(
-            model="gpt-4o",
-            input=messages
-        )
+        response = OPENAI_CLIENT.responses.create(model="gpt-4o", input=messages)
         result_text = response.output_text
         self.history.append({"role": "assistant", "content": result_text})
 
@@ -235,7 +237,7 @@ def execute_ros2_code(code_str):
     filename = "generated_move.py"
     if not code_str or "rclpy" not in code_str:
         return "Error: Invalid ROS2 code."
-    
+
     with open(filename, "w") as f:
         f.write(code_str)
 
@@ -259,7 +261,7 @@ def run_episode(scene_id):
         print(f"Error: GT file not found {gt_path}")
         return
 
-    with open(gt_path, "r") as f:
+    with open(gt_path, "r", encoding="utf-8") as f:
         gt_data = json.load(f)
 
     if not gt_data.get("cylinders"):
@@ -273,17 +275,17 @@ def run_episode(scene_id):
     # 2. Load Stage
     scene_usd_path = os.path.abspath(f"{SCENE_DIR}/scene_{scene_id}.usd")
     open_stage(scene_usd_path)
-    
+
     world = World(stage_units_in_meters=1.0)
     stage = omni.usd.get_context().get_stage()
 
     # 3. Setup Cameras & Robot Tracker
     ego_cam_path = "/World/turtlebot4/oakd_link/Camera"
     top_cam_path = "/World/Camera"
-    
+
     ego_cam = Camera(prim_path=ego_cam_path, name="ego_cam", resolution=(250, 250))
     top_cam = Camera(prim_path=top_cam_path, name="top_cam", resolution=(1280, 720))
-    
+
     # Initialize the Robot Prim for Tracking (Adjust path if needed)
     robot_prim = XFormPrim(prim_path="/World/turtlebot4", name="robot_base")
 
@@ -320,39 +322,41 @@ def run_episode(scene_id):
         # B. Get Robot Pose & Draw Arrow
         # Get absolute position and orientation
         pos, rot = robot_prim.get_world_pose()
-        
+
         # Calculate yaw
         _, _, yaw = quat_to_euler_angles(rot)
-        
+
         # Define arrow geometry in 3D
         arrow_len = 0.6
-        start_3d = pos + np.array([0, 0, 0.1]) # Lift slightly
-        end_3d = start_3d + np.array([np.cos(yaw) * arrow_len, np.sin(yaw) * arrow_len, 0])
+        start_3d = pos + np.array([0, 0, 0.1])  # Lift slightly
+        end_3d = start_3d + np.array(
+            [np.cos(yaw) * arrow_len, np.sin(yaw) * arrow_len, 0]
+        )
 
         # --- REPLACED: Custom Projection Matrix Logic ---
         # 1. Get View Matrix (Keeping ROS convention for View if Camera is setup that way)
         view_mtx = top_cam.get_view_matrix_ros()
-        
+
         # 2. Compute Projection Matrix Manually
         # Get actual prim to read attributes
         camera_prim = stage.GetPrimAtPath(top_cam_path)
-        
+
         # Read USD attributes
         focal_length = camera_prim.GetAttribute("focalLength").Get()
         horiz_aperture = camera_prim.GetAttribute("horizontalAperture").Get()
         # Using sensor resolution instead of viewport_api to ensure sync with image data
-        width, height = top_cam.get_resolution() 
+        width, height = top_cam.get_resolution()
         near, far = camera_prim.GetAttribute("clippingRange").Get()
-        
+
         # Calculations
         aspect_ratio = width / height
         fov = 2 * math.atan(horiz_aperture / (2 * focal_length))
-        
+
         # Helper to compute projection matrix
         # Note: helpers returns a list, we need numpy array
         proj_list = helpers.get_projection_matrix(fov, aspect_ratio, near, far)
         proj_mtx = np.array(proj_list).reshape(4, 4)
-        
+
         # -----------------------------------------------
 
         # Project
@@ -368,7 +372,7 @@ def run_episode(scene_id):
 
         # C. Encode
         ego_b64 = encode_image_to_base64(ego_img)
-        top_b64 = encode_image_to_base64(top_img) # Contains arrow now
+        top_b64 = encode_image_to_base64(top_img)  # Contains arrow now
 
         # D. Planner Think
         print(f"Round {round_idx+1}: Planner Thinking...")
@@ -378,7 +382,7 @@ def run_episode(scene_id):
             "round": round_idx,
             "robot_pos": pos.tolist(),
             "planner_action": decision["action"],
-            "planner_content": decision["content"]
+            "planner_content": decision["content"],
         }
 
         # E. Execute or Ask
@@ -386,10 +390,12 @@ def run_episode(scene_id):
             print(f"Planner asks: {decision['content']}")
             hint = human.get_hint(top_b64, decision["content"], pos.tolist())
             print(f"Human replies: {hint}")
-            
+
             # Save visual log
-            Image.fromarray(top_img).save(f"{OUTPUT_DIR}/{scene_id}_r{round_idx}_top.jpg")
-            
+            Image.fromarray(top_img).save(
+                f"{OUTPUT_DIR}/{scene_id}_r{round_idx}_top.jpg"
+            )
+
             step_log["human_hint"] = hint
 
         elif decision["action"] == "code":

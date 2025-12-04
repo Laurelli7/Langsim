@@ -4,6 +4,7 @@
 from isaacsim import SimulationApp
 import os
 import json
+import webcolors
 
 CONFIG = {
     "launch_config": {"renderer": "RayTracedLighting", "headless": False},
@@ -13,10 +14,10 @@ CONFIG = {
     "rt_subframes": 8,
     # Area for randomizing cylinders (and robot XY)
     "spawn_area": {
-        "xmin": -3.7,
-        "xmax": 3.7,
-        "ymin": -3.7,
-        "ymax": 3.7,
+        "xmin": -3.2,
+        "xmax": 3.2,
+        "ymin": -3.2,
+        "ymax": 3.2,
         "z": -0.25,
     },
     "objects_per_frame": 3,
@@ -28,11 +29,9 @@ CONFIG = {
         "bounding_box_2d_tight": True,
     },
     "scene_snapshot_dir": "/home/dotin13/isaac-proj/scene_snapshots",
-
     # Existing cameras in the scene
     "world_cam_prim": "/World/Camera",
     "tb_cam_prim": "/World/turtlebot4/oakd_link/Camera",
-
     # Robot prim to randomize
     "robot_prim": "/World/turtlebot4",
 }
@@ -260,6 +259,10 @@ def register_cylinder_randomizer(config, cylinders):
 
     area = config["spawn_area"]
     count = config["objects_per_frame"]
+    
+    # Precompute a list of RGB colors from HTML4 named colors
+    colors = [webcolors.name_to_rgb(name) for name in webcolors.names("html4")]
+    colors = [(c.red / 255.0, c.green / 255.0, c.blue / 255.0) for c in colors]
 
     def randomize_existing_cylinders():
         # Reposition, re-rotate, re-scale, recolor the same cylinders each frame
@@ -279,10 +282,7 @@ def register_cylinder_randomizer(config, cylinders):
                 ),
             )
             mats = rep.create.material_omnipbr(
-                diffuse=rep.distribution.uniform(
-                    (0.0, 0.0, 0.0),
-                    (1.0, 1.0, 1.0),
-                ),
+                diffuse=rep.distribution.choice(colors),
                 count=count,
             )
             rep.randomizer.materials(mats)
