@@ -259,7 +259,7 @@ def register_cylinder_randomizer(config, cylinders):
 
     area = config["spawn_area"]
     count = config["objects_per_frame"]
-    
+
     # Precompute a list of RGB colors from HTML4 named colors
     colors = [webcolors.name_to_rgb(name) for name in webcolors.names("html4")]
     colors = [(c.red / 255.0, c.green / 255.0, c.blue / 255.0) for c in colors]

@@ -22,7 +22,6 @@ class HumanOracle:
             print("Question:", question)
             print("Target:", json.dumps(self.target, indent=2))
             print("Cylinders:", json.dumps(self.gt_data["cylinders"], indent=2))
-            print("\n(Top-down image omitted; base64 available if needed.)")
             return input("Enter your advice to the robot: ")
 
         # Otherwise, use the LLM mode
