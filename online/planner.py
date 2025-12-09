@@ -61,7 +61,7 @@ class PlannerNode(Node):
         # Initialize agents
         # -----------------------
         self.planner = PlannerAgent(goal_description=target_desc)
-        self.human = HumanOracle(self.gt_data, target_cylinder, human_mode=True)
+        self.human = HumanOracle(self.gt_data, target_cylinder, human_mode=False)
 
         # -----------------------
         # Internal state

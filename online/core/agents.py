@@ -74,6 +74,7 @@ from helpers import *
 TOPIC_CMD_VEL = os.getenv("TOPIC_CMD_VEL", "/cmd_vel")
 TOPIC_SCAN = os.getenv("TOPIC_SCAN", "/scan")
 TOPIC_CAMERA = os.getenv("TOPIC_CAMERA", "/camera_rgb")
+ROBOT_FRONT_ANGLE = float(os.getenv("ROBOT_FRONT_ANGLE", "0.0"))  # in radians
 
 class FindCylinder(Node):
     def __init__(self):
@@ -151,13 +152,13 @@ You have access to the following helper functions (imported via `from helpers im
 3. stop(cmd_vel_pub)
    - Sends a Twist command with linear.x = 0.0 and angular.z = 0.0 to stop the robot.
 
-4. find_colored_blob(cv_image, lower_hsv, upper_hsv, min_area=500) -> (found, cx, cy, area)
+4. find_colored_blob(cv_image, lower_hsv, upper_hsv, min_area=200) -> (found, cx, cy, area)
    - Takes a BGR cv2 image and HSV bounds and returns whether a blob was found.
    - If found is True, cx and cy are the centroid pixel coordinates of the largest blob, and area is its contour area.
    - If no valid blob is found, returns (False, None, None, 0.0).
 
 5. rotate_and_search_step(cmd_vel_pub, get_latest_image, lower_hsv, upper_hsv,
-                          angular_speed=0.4, clockwise=False, min_area=800, active=True)
+                          angular_speed=0.4, clockwise=False, min_area=200, active=True)
    - ONE CONTROL STEP of rotating in place while searching for a colored object.
    - If active is True, publishes a rotation Twist and looks at the latest image from get_latest_image().
    - Returns (found, cx, area):
@@ -168,7 +169,7 @@ You have access to the following helper functions (imported via `from helpers im
 
 6. approach_colored_object_step(cmd_vel_pub, get_latest_image, lower_hsv, upper_hsv,
                                 image_width, target_area=20000, linear_speed=0.18,
-                                k_angular=0.004, min_area=800, active=True)
+                                k_angular=0.004, min_area=200, active=True)
    - ONE CONTROL STEP of approaching a colored object while trying to keep it centered in the image.
    - The camera resolution is 250x250 pixels and a target area of 20000 roughly means being 0.8 meters away.
    - Uses the latest camera image to find the target blob and computes a Twist with forward motion plus

@@ -5,6 +5,25 @@ from geometry_msgs.msg import Twist
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 
+COLOR_BOUNDS = {
+    "aqua": {"lower": (70, 205, 205), "upper": (110, 255, 255)},
+    "black": {"lower": (0, 0, 0), "upper": (180, 255, 110)},
+    "blue": {"lower": (100, 205, 205), "upper": (140, 255, 255)},
+    "fuchsia": {"lower": (130, 205, 205), "upper": (170, 255, 255)},
+    "green": {"lower": (40, 105, 0), "upper": (80, 255, 178)},
+    "gray": {"lower": (0, 0, 0), "upper": (180, 130, 178)},
+    "lime": {"lower": (40, 205, 205), "upper": (80, 255, 255)},
+    "maroon": {"lower": (0, 105, 0), "upper": (20, 255, 178)},
+    "navy": {"lower": (100, 105, 0), "upper": (140, 255, 178)},
+    "olive": {"lower": (10, 105, 0), "upper": (50, 255, 178)},
+    "purple": {"lower": (130, 105, 0), "upper": (170, 255, 178)},
+    "red": {"lower": (0, 205, 205), "upper": (20, 255, 255)},
+    "silver": {"lower": (0, 0, 42), "upper": (180, 130, 255)},
+    "teal": {"lower": (70, 105, 0), "upper": (110, 255, 178)},
+    "white": {"lower": (0, 0, 105), "upper": (180, 130, 255)},
+    "yellow": {"lower": (10, 205, 205), "upper": (60, 255, 255)},
+}
+
 
 def move_forward(cmd_vel_pub, speed=0.2):
     """
