@@ -34,7 +34,9 @@ class HumanOracle:
             f"Position: {robot_pos}. "
             f"Objects Data: {cylinders_info}. "
             f"TARGET OBJECT: {target_info}. "
-            "Guide the robot to the target. Give brief, one-sentence, natural language directions like a human operator would do."
+            "- Guide the robot to the target. Give brief, one-sentence, natural language directions as a human operator."
+            "- Nav planning is priority, low-level control advice is supplemental. "
+            "- The robot doesn't have the ceiling camera view, so give advice relative to robot position and direction instead of global up-down and left-right."
         )
 
         response = OPENAI_CLIENT.responses.create(
@@ -94,6 +96,8 @@ class FindCylinder(Node):
         self.bridge = CvBridge()
         
         # Your state machine and logic goes here
+        self.state = ""
+        self.state_start_time = self.get_clock().now().nanoseconds / 1e9  # seconds
 
     def image_callback(self, msg: Image):
         try:
@@ -131,6 +135,7 @@ GOAL: {goal_description}.
 
 1. **You are encouraged to ask for extra information whenever you're unsure how to achieve the goal**:
    - Describe your problem in one sentence and ask for help in another.
+   - Prioritize asking high-level nav planning and problem-solving questions, only ask specific low-level questions if absolutely necessary.
 
 2. If you think you have enough information from the observations and human hints:
    - Output Python code, and make sure you use code fences: `python ...`.
@@ -184,6 +189,7 @@ Important constraints:
 - These helper functions do NOT handle time.sleep or durations internally; they are single-step controllers.
 - In your generated code, use ROS 2 timers or a main loop to call these functions at a fixed rate and implement
   higher-level behaviors (search, approach, etc.) as a simple state machine.
+- When hitting obstacles, you can always rotate and avoid it in place as the turtlebot is in circular shape.
 
 Color detection helpers:
 - You are given loose HSV bounds for several HTML4 color names, suitable for OpenCV-based color detection.

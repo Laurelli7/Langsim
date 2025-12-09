@@ -4,12 +4,20 @@ import json
 import time
 import base64
 import random
+
 import rclpy
 from rclpy.node import Node
 from rclpy.wait_for_message import wait_for_message
+
 from sensor_msgs.msg import Image as RosImage
 from geometry_msgs.msg import Twist
-from simulation_interfaces.srv import GetEntityState
+from simulation_interfaces.srv import (
+    GetEntityState,
+    ResetSimulation,
+    SetSimulationState,
+    LoadWorld,
+)
+from simulation_interfaces.msg import SimulationState as SimStateMsg
 
 from cv_bridge import CvBridge
 import cv2
@@ -24,17 +32,17 @@ from .core.executor import execute_ros2_code
 
 
 class PlannerNode(Node):
-    def __init__(self, scene_id: str):
+    def __init__(self, scene_id: str, run_idx: int = 0):
         super().__init__("planner_node")
 
         self.scene_id = scene_id
+        self.run_idx = run_idx
         self.bridge = CvBridge()
 
         # -----------------------
-        # Initialize Simulation Control Client
+        # Initialize Simulation Control Client for pose
         # -----------------------
         self.sim_client = self.create_client(GetEntityState, "/get_entity_state")
-        # Optional: Wait for service (non-blocking here, checked in loop)
         if not self.sim_client.wait_for_service(timeout_sec=2.0):
             self.get_logger().warn("/get_entity_state service not available yet.")
 
@@ -50,10 +58,12 @@ class PlannerNode(Node):
 
         target_cylinder = random.choice(self.gt_data["cylinders"])
         target_rgb = target_cylinder.get("color", [1.0, 1.0, 1.0])
-        target_desc = f"Find the {get_color_name(target_rgb)} cylinder and move close to it."
-        # Save target cylinder data specifically for distance checking
+        target_desc = (
+            f"Find the {get_color_name(target_rgb)} cylinder and move close to it."
+        )
+
         self.target_cylinder_data = target_cylinder
-        self.target_pos = self.target_cylinder_data["position"]  # Expecting [x, y, z]
+        self.target_pos = self.target_cylinder_data["position"]  # [x, y, z]
 
         self.get_logger().info(f"[PLANNER] Target: {target_desc}")
 
@@ -73,9 +83,10 @@ class PlannerNode(Node):
         # Define success threshold (in meters)
         self.success_threshold = 0.8
 
-        # Update log data structure to hold results
+        # Per-episode log data
         self.log_data = {
             "scene": scene_id,
+            "run_idx": run_idx,
             "dialogue": [],
             "steps": [],
             "success": False,
@@ -84,7 +95,9 @@ class PlannerNode(Node):
         }
 
         self.cmd_pub = self.create_publisher(Twist, "/cmd_vel", 10)
-        self.get_logger().info("[PLANNER] Node initialized.")
+        self.get_logger().info(
+            f"[PLANNER] Node initialized for scene {scene_id}, run {run_idx}."
+        )
 
         os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -96,7 +109,7 @@ class PlannerNode(Node):
         return msg
 
     # ----------------------------------------------------------------------
-    # Encode image → base64 (same as original behavior)
+    # Encode image → base64
     # ----------------------------------------------------------------------
     def encode_image_to_base64(self, img_rgb: np.ndarray) -> str:
         success, buffer = cv2.imencode(".jpg", cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR))
@@ -114,11 +127,9 @@ class PlannerNode(Node):
             return None
 
         request = GetEntityState.Request()
-        request.entity = entity_name  # Ensure this matches your USD prim path
+        request.entity = entity_name
 
         future = self.sim_client.call_async(request)
-
-        # We spin specifically for this request since we are in a script-style loop
         rclpy.spin_until_future_complete(self, future, timeout_sec=1.0)
 
         try:
@@ -134,7 +145,7 @@ class PlannerNode(Node):
             return None
 
     # ----------------------------------------------------------------------
-    # Main episode logic
+    # Main episode logic (single run)
     # ----------------------------------------------------------------------
     def run_episode(self):
 
@@ -146,18 +157,16 @@ class PlannerNode(Node):
 
             current_dist = float("inf")
             if robot_pos is not None and robot_pos != "Unknown":
-                # Calculate Euclidean distance (ignoring Z if strictly 2D navigation,
-                # but 3D is safer for general calculations)
                 dx = robot_pos[0] - self.target_pos[0]
                 dy = robot_pos[1] - self.target_pos[1]
-                # dz = robot_pos[2] - self.target_pos[2] # Optional: include Z
                 current_dist = math.sqrt(dx * dx + dy * dy)
 
                 self.get_logger().info(
-                    f"[METRICS] Target Pos: {self.target_pos[:2]}, Robot Pos: {robot_pos[:2]}, Dist: {current_dist:.2f}"
+                    f"[METRICS] Target Pos: {self.target_pos[:2]}, "
+                    f"Robot Pos: {robot_pos[:2]}, Dist: {current_dist:.2f}"
                 )
 
-                # Check termination condition
+                # Termination condition
                 if current_dist < self.success_threshold:
                     self.get_logger().info(
                         f"[SUCCESS] Robot is close enough ({current_dist:.2f}m). Stopping."
@@ -170,17 +179,21 @@ class PlannerNode(Node):
             # Stop if max rounds reached
             if self.round_idx >= MAX_ROUNDS:
                 self.get_logger().info("[PLANNER] Max rounds reached.")
-                self.log_data["final_distance"] = current_dist
+                self.log_data["final_distance"] = (
+                    current_dist if current_dist != float("inf") else None
+                )
                 break
 
             # -----------------------
-            # Retrieve latest camera frame on demand
+            # Retrieve latest camera frames
             # -----------------------
             img_msg = self.get_latest_image(topic="/camera_rgb", timeout_sec=1.0)
             top_msg = self.get_latest_image(topic="/camera_top_rgb", timeout_sec=1.0)
 
             if img_msg is None or top_msg is None:
-                self.get_logger().warn("No /camera_rgb image received yet...")
+                self.get_logger().warn(
+                    "No image received from /camera_rgb or /camera_top_rgb..."
+                )
                 time.sleep(0.1)
                 continue
 
@@ -190,13 +203,12 @@ class PlannerNode(Node):
             top_img = self.bridge.imgmsg_to_cv2(top_msg, desired_encoding="bgr8")
             top_img_rgb = cv2.cvtColor(top_img, cv2.COLOR_BGR2RGB)
 
-            # Save debug image
-            PILImage.fromarray(ego_img_rgb).save(
-                f"{OUTPUT_DIR}/{self.scene_id}_r{self.round_idx}_ego.jpg"
-            )
-            PILImage.fromarray(top_img_rgb).save(
-                f"{OUTPUT_DIR}/{self.scene_id}_r{self.round_idx}_top.jpg"
-            )
+            # Save debug images
+            ego_path = f"{OUTPUT_DIR}/{self.scene_id}_run{self.run_idx}_r{self.round_idx}_ego.jpg"
+            top_path = f"{OUTPUT_DIR}/{self.scene_id}_run{self.run_idx}_r{self.round_idx}_top.jpg"
+            PILImage.fromarray(ego_img_rgb).save(ego_path)
+            PILImage.fromarray(top_img_rgb).save(top_path)
+
             # Encode to base64
             ego_b64 = self.encode_image_to_base64(ego_img_rgb)
             top_b64 = self.encode_image_to_base64(top_img_rgb)
@@ -204,7 +216,7 @@ class PlannerNode(Node):
             # -----------------------
             # Planner step
             # -----------------------
-            self.get_logger().info(f"[PLANNER] Round {self.round_idx+1}: thinking...")
+            self.get_logger().info(f"[PLANNER] Round {self.round_idx + 1}: thinking...")
 
             decision = self.planner.think(ego_b64, human_hint=self.hint)
 
@@ -218,7 +230,7 @@ class PlannerNode(Node):
             self.log_data["steps"].append(step_log)
 
             # -----------------------
-            # 4. Handle "ask human"
+            # Handle "ask human"
             # -----------------------
             if decision["action"] == "ask":
                 question = decision["content"]
@@ -228,44 +240,134 @@ class PlannerNode(Node):
                 self.get_logger().info(f"[HUMAN] Hint: {self.hint}")
 
             # -----------------------
-            # 5. Handle "code" action
+            # Handle "code" action
             # -----------------------
             elif decision["action"] == "code":
                 self.get_logger().info("[PLANNER] Generated code → executing")
-                filename = f"{OUTPUT_DIR}/{self.scene_id}_r{self.round_idx}_code.py"
+                filename = f"{OUTPUT_DIR}/{self.scene_id}_run{self.run_idx}_r{self.round_idx}_code.py"
                 execute_ros2_code(decision["content"], filename=filename)
                 # Reset robot commands after execution
                 stop_msg = Twist()
                 self.cmd_pub.publish(stop_msg)
-                self.hint = "We are still working towards the goal. Please ask for more information if needed."
+                self.hint = (
+                    "We are still working towards the goal. "
+                    "Please ask for more information if needed."
+                )
 
             self.round_idx += 1
 
         self.finish_episode()
 
     # ----------------------------------------------------------------------
-    # Write logs + shutdown
+    # Write logs (no shutdown here)
     # ----------------------------------------------------------------------
     def finish_episode(self):
-        log_path = f"{OUTPUT_DIR}/log_{self.scene_id}.json"
         self.log_data["dialogue"] = self.planner.history
+        self.log_data["rounds_taken"] = self.round_idx
+
+        log_path = f"{OUTPUT_DIR}/log_{self.scene_id}_run{self.run_idx}.json"
         with open(log_path, "w", encoding="utf-8") as f:
             json.dump(self.log_data, f, indent=2)
 
         self.get_logger().info(f"[PLANNER] Episode finished. Saved log to: {log_path}")
-        rclpy.shutdown()
 
 
 # ------------------------------------------------------------------------------
-# Entry point
+# Simulation Control Node
+# ------------------------------------------------------------------------------
+class SimControlNode(Node):
+    def __init__(self):
+        super().__init__("sim_control_node")
+
+        self.set_state_client = self.create_client(
+            SetSimulationState, "/set_simulation_state"
+        )
+        self.reset_client = self.create_client(ResetSimulation, "/reset_simulation")
+        self.load_world_client = self.create_client(LoadWorld, "/load_world")
+
+        # Wait for services (best-effort)
+        for client, name in [
+            (self.set_state_client, "/set_simulation_state"),
+            (self.reset_client, "/reset_simulation"),
+            (self.load_world_client, "/load_world"),
+        ]:
+            if not client.wait_for_service(timeout_sec=10.0):
+                self.get_logger().warn(f"Service {name} not available.")
+
+    def _call_and_wait(self, client, request, timeout=10.0, desc="service"):
+        future = client.call_async(request)
+        rclpy.spin_until_future_complete(self, future, timeout_sec=timeout)
+        if future.result() is None:
+            self.get_logger().error(f"{desc} call failed or timed out.")
+            return None
+        return future.result()
+
+    def set_state(self, state: int):
+        req = SetSimulationState.Request()
+        req.state.state = state
+        self._call_and_wait(self.set_state_client, req, desc="SetSimulationState")
+        self.get_logger().info(f"[SIM] Set simulation state to {state}")
+
+    def reset_simulation(self):
+        req = ResetSimulation.Request()
+        self._call_and_wait(self.reset_client, req, desc="ResetSimulation")
+        self.get_logger().info("[SIM] Reset simulation to initial state")
+
+    def load_world(self, uri: str):
+        req = LoadWorld.Request()
+        req.uri = uri
+        self._call_and_wait(self.load_world_client, req, desc="LoadWorld")
+        self.get_logger().info(f"[SIM] Loaded world from URI: {uri}")
+
+
+# ------------------------------------------------------------------------------
+# Entry point - run 5 times per scene, automate world & sim control
 # ------------------------------------------------------------------------------
 def main():
     rclpy.init()
-    scene_id = "0000"
-    node = PlannerNode(scene_id)
 
-    # Run your episode logic in foreground thread.
-    node.run_episode()
+    # Configure your scenes here:
+    # e.g. ["0000", "0001", "0002"]
+    scene_ids = ["0001", "0002"]
+    runs_per_scene = 2
+
+    sim_control = SimControlNode()
+
+    try:
+        for scene_id in scene_ids:
+            # Infer world URI from SCENE_DIR; adjust if your worlds live elsewhere
+            world_uri = os.path.join(SCENE_DIR, f"scene_{scene_id}.usd")
+
+            sim_control.get_logger().info(
+                f"[SIM] Preparing scene {scene_id} with world URI: {world_uri}"
+            )
+
+            # Ensure simulation is stopped, then load the world
+            sim_control.set_state(SimStateMsg.STATE_STOPPED)
+            sim_control.load_world(world_uri)
+
+            for run_idx in range(runs_per_scene):
+                sim_control.get_logger().info(
+                    f"[SIM] === Scene {scene_id}, Run {run_idx} ==="
+                )
+
+                # Reset environment to initial state
+                sim_control.reset_simulation()
+
+                # Make sure simulation is playing so sensors and physics update
+                sim_control.set_state(SimStateMsg.STATE_PLAYING)
+
+                # Run a single Planner episode
+                node = PlannerNode(scene_id=scene_id, run_idx=run_idx)
+                node.run_episode()
+                node.destroy_node()
+
+            # Stop simulation after finishing all runs for this scene
+            sim_control.set_state(SimStateMsg.STATE_STOPPED)
+
+    finally:
+        sim_control.destroy_node()
+        rclpy.shutdown()
 
 
 if __name__ == "__main__":

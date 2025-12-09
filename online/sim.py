@@ -13,6 +13,7 @@ simulation_app.update()
 
 from .constants import SCENE_DIR
 from .core.sim_manager import SimManager
+from isaacsim.core.api import World
 
 
 def run_sim(scene_id: str):
@@ -27,7 +28,19 @@ def run_sim(scene_id: str):
 
     print("[SIM] Starting main stepping loop...")
     while simulation_app.is_running():
-        sim.step()
+        # Check if the world has been invalidated (e.g. by a ROS load_world call)
+        if not sim.world.instance():
+            print("Stage changed externally. Re-initializing World...")
+            # Re-initialize the World wrapper for the new stage
+            sim.world = World()
+            sim.world.reset()
+
+        # Safely step
+        try:
+            sim.world.step(render=True)
+        except Exception as e:
+            print(f"Error during step: {e}")
+            # Optional: Decide if you want to break or continue
 
 
 if __name__ == "__main__":

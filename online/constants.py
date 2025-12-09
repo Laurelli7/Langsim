@@ -13,7 +13,7 @@ ENV_CONFIG = {
 # Global Constants
 MAX_ROUNDS = 5
 OUTPUT_DIR = "dataset_logs"
-SCENE_DIR = "scene_snapshots"
+SCENE_DIR = "/home/dotin13/isaac-proj/scene_snapshots"
 
 # Initialize Client (Lazy initialization or global access)
 try:
