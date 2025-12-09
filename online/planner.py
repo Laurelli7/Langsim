@@ -1,3 +1,4 @@
+import math
 import os
 import json
 import time
@@ -7,6 +8,8 @@ import rclpy
 from rclpy.node import Node
 from rclpy.wait_for_message import wait_for_message
 from sensor_msgs.msg import Image as RosImage
+from geometry_msgs.msg import Twist
+from simulation_interfaces.srv import GetEntityState
 
 from cv_bridge import CvBridge
 import cv2
@@ -28,6 +31,14 @@ class PlannerNode(Node):
         self.bridge = CvBridge()
 
         # -----------------------
+        # Initialize Simulation Control Client
+        # -----------------------
+        self.sim_client = self.create_client(GetEntityState, "/get_entity_state")
+        # Optional: Wait for service (non-blocking here, checked in loop)
+        if not self.sim_client.wait_for_service(timeout_sec=2.0):
+            self.get_logger().warn("/get_entity_state service not available yet.")
+
+        # -----------------------
         # Load GT and pick target
         # -----------------------
         gt_path = os.path.abspath(f"{SCENE_DIR}/scene_{scene_id}_gt.json")
@@ -39,7 +50,10 @@ class PlannerNode(Node):
 
         target_cylinder = random.choice(self.gt_data["cylinders"])
         target_rgb = target_cylinder.get("color", [1.0, 1.0, 1.0])
-        target_desc = f"Find the {get_color_name(target_rgb)} cylinder and navigate to right in front of it."
+        target_desc = f"Find the {get_color_name(target_rgb)} cylinder and move close to it."
+        # Save target cylinder data specifically for distance checking
+        self.target_cylinder_data = target_cylinder
+        self.target_pos = self.target_cylinder_data["position"]  # Expecting [x, y, z]
 
         self.get_logger().info(f"[PLANNER] Target: {target_desc}")
 
@@ -56,21 +70,29 @@ class PlannerNode(Node):
         self.hint = None
         self.episode_done = False
 
-        self.log_data = {"scene": scene_id, "dialogue": []}
+        # Define success threshold (in meters)
+        self.success_threshold = 0.8
 
-        # -----------------------
-        # We do NOT create a subscription.
-        # We will manually pull images using wait_for_message()
-        # -----------------------
-        self.get_logger().info("[PLANNER] Node initialized (no callbacks).")
+        # Update log data structure to hold results
+        self.log_data = {
+            "scene": scene_id,
+            "dialogue": [],
+            "steps": [],
+            "success": False,
+            "final_distance": None,
+            "rounds_taken": 0,
+        }
+
+        self.cmd_pub = self.create_publisher(Twist, "/cmd_vel", 10)
+        self.get_logger().info("[PLANNER] Node initialized.")
 
         os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     # ----------------------------------------------------------------------
     # Helper: block until a camera image is received
     # ----------------------------------------------------------------------
-    def get_latest_ego_image(self, timeout_sec=1.0):
-        _, msg = wait_for_message(RosImage, self, "/camera_rgb", time_to_wait=timeout_sec)
+    def get_latest_image(self, topic="/camera_rgb", timeout_sec=1.0):
+        _, msg = wait_for_message(RosImage, self, topic, time_to_wait=timeout_sec)
         return msg
 
     # ----------------------------------------------------------------------
@@ -82,6 +104,35 @@ class PlannerNode(Node):
             raise RuntimeError("Failed to encode image")
         return base64.b64encode(buffer.tobytes()).decode("utf-8")
 
+    def fetch_robot_pose(self, entity_name="/World/turtlebot4/base_link"):
+        """
+        Calls the /get_entity_state service provided by Isaac Sim.
+        Returns [x, y, z] or None if failed.
+        """
+        if not self.sim_client.service_is_ready():
+            self.get_logger().warn("Sim service not ready.")
+            return None
+
+        request = GetEntityState.Request()
+        request.entity = entity_name  # Ensure this matches your USD prim path
+
+        future = self.sim_client.call_async(request)
+
+        # We spin specifically for this request since we are in a script-style loop
+        rclpy.spin_until_future_complete(self, future, timeout_sec=1.0)
+
+        try:
+            response = future.result()
+            if response:
+                pos = response.state.pose.position
+                return [round(pos.x, 2), round(pos.y, 2), round(pos.z, 2)]
+            else:
+                self.get_logger().warn(f"Failed to get state for {entity_name}")
+                return None
+        except Exception as e:
+            self.get_logger().error(f"Service call exception: {e}")
+            return None
+
     # ----------------------------------------------------------------------
     # Main episode logic
     # ----------------------------------------------------------------------
@@ -91,48 +142,80 @@ class PlannerNode(Node):
 
         while rclpy.ok() and not self.episode_done:
 
+            robot_pos = self.fetch_robot_pose(entity_name="/World/turtlebot4/base_link")
+
+            current_dist = float("inf")
+            if robot_pos is not None and robot_pos != "Unknown":
+                # Calculate Euclidean distance (ignoring Z if strictly 2D navigation,
+                # but 3D is safer for general calculations)
+                dx = robot_pos[0] - self.target_pos[0]
+                dy = robot_pos[1] - self.target_pos[1]
+                # dz = robot_pos[2] - self.target_pos[2] # Optional: include Z
+                current_dist = math.sqrt(dx * dx + dy * dy)
+
+                self.get_logger().info(
+                    f"[METRICS] Target Pos: {self.target_pos[:2]}, Robot Pos: {robot_pos[:2]}, Dist: {current_dist:.2f}"
+                )
+
+                # Check termination condition
+                if current_dist < self.success_threshold:
+                    self.get_logger().info(
+                        f"[SUCCESS] Robot is close enough ({current_dist:.2f}m). Stopping."
+                    )
+                    self.episode_done = True
+                    self.log_data["success"] = True
+                    self.log_data["final_distance"] = current_dist
+                    break
+
+            # Stop if max rounds reached
             if self.round_idx >= MAX_ROUNDS:
                 self.get_logger().info("[PLANNER] Max rounds reached.")
+                self.log_data["final_distance"] = current_dist
                 break
 
             # -----------------------
-            # 1. Retrieve latest camera frame on demand
+            # Retrieve latest camera frame on demand
             # -----------------------
-            img_msg = self.get_latest_ego_image(timeout_sec=1.0)
+            img_msg = self.get_latest_image(topic="/camera_rgb", timeout_sec=1.0)
+            top_msg = self.get_latest_image(topic="/camera_top_rgb", timeout_sec=1.0)
 
-            if img_msg is None:
+            if img_msg is None or top_msg is None:
                 self.get_logger().warn("No /camera_rgb image received yet...")
                 time.sleep(0.1)
                 continue
-            
+
             # Convert ROS → CV2
             ego_img = self.bridge.imgmsg_to_cv2(img_msg, desired_encoding="bgr8")
             ego_img_rgb = cv2.cvtColor(ego_img, cv2.COLOR_BGR2RGB)
+            top_img = self.bridge.imgmsg_to_cv2(top_msg, desired_encoding="bgr8")
+            top_img_rgb = cv2.cvtColor(top_img, cv2.COLOR_BGR2RGB)
 
             # Save debug image
             PILImage.fromarray(ego_img_rgb).save(
                 f"{OUTPUT_DIR}/{self.scene_id}_r{self.round_idx}_ego.jpg"
             )
-
-            # -----------------------
-            # 2. Encode for LLM
-            # -----------------------
-            ego_b64 = self.encode_image_to_base64(ego_img_rgb)
-
-            # -----------------------
-            # 3. Planner step
-            # -----------------------
-            self.get_logger().info(
-                f"[PLANNER] Round {self.round_idx+1}: thinking..."
+            PILImage.fromarray(top_img_rgb).save(
+                f"{OUTPUT_DIR}/{self.scene_id}_r{self.round_idx}_top.jpg"
             )
+            # Encode to base64
+            ego_b64 = self.encode_image_to_base64(ego_img_rgb)
+            top_b64 = self.encode_image_to_base64(top_img_rgb)
+
+            # -----------------------
+            # Planner step
+            # -----------------------
+            self.get_logger().info(f"[PLANNER] Round {self.round_idx+1}: thinking...")
 
             decision = self.planner.think(ego_b64, human_hint=self.hint)
 
             step_log = {
                 "round": self.round_idx,
-                "planner_action": decision["action"],
-                "planner_content": decision["content"],
+                "robot_pos": robot_pos,
+                "distance_to_target": (
+                    current_dist if current_dist != float("inf") else None
+                ),
             }
+            self.log_data["steps"].append(step_log)
 
             # -----------------------
             # 4. Handle "ask human"
@@ -141,29 +224,21 @@ class PlannerNode(Node):
                 question = decision["content"]
                 self.get_logger().info(f"[PLANNER] Asking human: {question}")
 
-                # Pass ego image (we don't have top image now)
-                top_b64 = ego_b64
-                self.hint = self.human.get_hint(top_b64, question, [])
+                self.hint = self.human.get_hint(top_b64, question, robot_pos)
                 self.get_logger().info(f"[HUMAN] Hint: {self.hint}")
-
-                step_log["human_hint"] = self.hint
 
             # -----------------------
             # 5. Handle "code" action
             # -----------------------
             elif decision["action"] == "code":
                 self.get_logger().info("[PLANNER] Generated code → executing")
-
                 filename = f"{OUTPUT_DIR}/{self.scene_id}_r{self.round_idx}_code.py"
-                result = execute_ros2_code(decision["content"], filename=filename)
+                execute_ros2_code(decision["content"], filename=filename)
+                # Reset robot commands after execution
+                stop_msg = Twist()
+                self.cmd_pub.publish(stop_msg)
+                self.hint = "We are still working towards the goal. Please ask for more information if needed."
 
-                step_log["result"] = result
-                self.log_data["dialogue"].append(step_log)
-
-                self.episode_done = True
-                break
-
-            self.log_data["dialogue"].append(step_log)
             self.round_idx += 1
 
         self.finish_episode()
@@ -173,6 +248,7 @@ class PlannerNode(Node):
     # ----------------------------------------------------------------------
     def finish_episode(self):
         log_path = f"{OUTPUT_DIR}/log_{self.scene_id}.json"
+        self.log_data["dialogue"] = self.planner.history
         with open(log_path, "w", encoding="utf-8") as f:
             json.dump(self.log_data, f, indent=2)
 

@@ -11,7 +11,7 @@ ENV_CONFIG = {
 }
 
 # Global Constants
-MAX_ROUNDS = 3
+MAX_ROUNDS = 5
 OUTPUT_DIR = "dataset_logs"
 SCENE_DIR = "scene_snapshots"
 

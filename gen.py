@@ -1,10 +1,12 @@
-# random_cylinders_sdg_with_robot_randomization.py
-# Static baked scenes with cylinders and a randomized TurtleBot4 pose (no SDG when opening USD)
+# random_cylinders_sdg_with_constraints.py
+# Static baked scenes with cylinders and a randomized TurtleBot4 pose
+# Includes constraints: No objects in exclusion zone, no uniform colors.
 
 from isaacsim import SimulationApp
 import os
 import json
 import webcolors
+import math
 
 CONFIG = {
     "launch_config": {"renderer": "RayTracedLighting", "headless": False},
@@ -14,10 +16,10 @@ CONFIG = {
     "rt_subframes": 8,
     # Area for randomizing cylinders (and robot XY)
     "spawn_area": {
-        "xmin": -3.2,
-        "xmax": 3.2,
-        "ymin": -3.2,
-        "ymax": 3.2,
+        "xmin": -3,
+        "xmax": 3,
+        "ymin": -3,
+        "ymax": 3,
         "z": -0.25,
     },
     "objects_per_frame": 3,
@@ -29,10 +31,8 @@ CONFIG = {
         "bounding_box_2d_tight": True,
     },
     "scene_snapshot_dir": "/home/dotin13/isaac-proj/scene_snapshots",
-    # Existing cameras in the scene
     "world_cam_prim": "/World/Camera",
     "tb_cam_prim": "/World/turtlebot4/oakd_link/Camera",
-    # Robot prim to randomize
     "robot_prim": "/World/turtlebot4",
 }
 
@@ -59,36 +59,26 @@ def load_scene(path):
 
 
 # ----------------------------------------
-# Camera & writer: only /World/Camera and TB4 cam
+# Camera & writer
 # ----------------------------------------
 def setup_cameras_and_writer(config):
     render_products = []
-
     world_cam_path = config.get("world_cam_prim")
     tb_cam_path = config.get("tb_cam_prim")
 
-    # World camera
     if world_cam_path:
         rp_world = rep.create.render_product(world_cam_path, config["resolution"])
         render_products.append(rp_world)
-        print(f"[Camera] Using world camera at: {world_cam_path}")
-    else:
-        print("[Camera] WARNING: no world_cam_prim configured")
 
-    # Turtlebot camera
     if tb_cam_path:
         rp_tb = rep.create.render_product(tb_cam_path, config["resolution"])
         render_products.append(rp_tb)
-        print(f"[Camera] Using turtlebot camera at: {tb_cam_path}")
-    else:
-        print("[Camera] WARNING: no tb_cam_prim configured")
 
     if not render_products:
         carb.log_error("[Camera] No render products created! Check camera prim paths.")
         simulation_app.close()
         raise SystemExit
 
-    # Ensure writer output path is absolute
     outdir = config["writer_config"]["output_dir"]
     if not os.path.isabs(outdir):
         config["writer_config"]["output_dir"] = os.path.join(os.getcwd(), outdir)
@@ -103,8 +93,7 @@ def setup_cameras_and_writer(config):
 
 
 # ----------------------------------------
-# Helper: strip Replicator/SDG graph from a USD file
-# (so snapshots are static when opened)
+# Strip Replicator graph
 # ----------------------------------------
 def strip_replicator_graph_from_file(usd_path):
     stage = Usd.Stage.Open(usd_path)
@@ -113,54 +102,40 @@ def strip_replicator_graph_from_file(usd_path):
         return
 
     to_remove = []
-
-    # Collect prims that look like Replicator/SDG/OmniGraph nodes
     for prim in stage.Traverse():
         name = prim.GetName().lower()
-        type_name = prim.GetTypeName().lower()
         if "sdg" in name:
             to_remove.append(prim.GetPath())
 
-    # Remove from deepest to highest so children go first
     to_remove = sorted(set(to_remove), key=lambda p: len(str(p)), reverse=True)
-
     for path in to_remove:
         stage.RemovePrim(path)
 
     stage.GetRootLayer().Save()
-    print(f"[Replicator] Stripped {len(to_remove)} prim(s) from {usd_path}")
 
 
 # ----------------------------------------
-# Helper: collect cylinder ground truth from current stage
+# Extract Data: Cylinders & Robot
 # ----------------------------------------
+def get_prim_translation(prim):
+    """Safely extract world translation from a prim."""
+    try:
+        world_mat = omni.usd.get_world_transform_matrix(prim)
+        pos = world_mat.ExtractTranslation()
+        return [float(pos[0]), float(pos[1]), float(pos[2])]
+    except Exception:
+        return None
+
+
 def collect_cylinder_ground_truth(stage):
-    """
-    Returns a list of dicts like:
-    {
-      "path": "/World/training_cylinder_01",
-      "position": [x, y, z],
-      "color": [r, g, b] or null if not found
-    }
-    """
     gt = []
     time = Usd.TimeCode.Default()
 
     for prim in stage.Traverse():
         name = prim.GetName()
         if name == "training_cylinder":
-            # World transform
-            try:
-                world_mat = omni.usd.get_world_transform_matrix(prim)
-                pos = world_mat.ExtractTranslation()
-                position = [float(pos[0]), float(pos[1]), float(pos[2])]
-            except Exception as e:
-                carb.log_warn(
-                    f"[GT] Failed to get world transform for {prim.GetPath()}: {e}"
-                )
-                position = [0.0, 0.0, 0.0]
+            position = get_prim_translation(prim) or [0.0, 0.0, 0.0]
 
-            # Try to get bound material and its OmniPBR base color
             color = None
             try:
                 binding_api = UsdShade.MaterialBindingAPI(prim)
@@ -168,26 +143,18 @@ def collect_cylinder_ground_truth(stage):
                 if mat:
                     material_prim = mat.GetPrim()
                     shader = None
-                    # Look for a Shader child (common pattern for OmniPBR)
                     for child in material_prim.GetChildren():
                         if child.GetTypeName() == "Shader":
                             shader = UsdShade.Shader(child)
                             break
-
                     if shader:
-                        # OmniPBR base color input name is "diffuse_color_constant"
-                        # (linear RGB in USD space)
                         inp = shader.GetInput("diffuse_color_constant")
                         if inp:
                             val = inp.Get(time)
                             if val is not None:
-                                # val is a Gf.Vec3f
                                 color = [float(val[0]), float(val[1]), float(val[2])]
-            except Exception as e:
-                # Don't kill the run if GT color fails; just leave color=None
-                carb.log_warn(
-                    f"[GT] Failed to read material color for {prim.GetPath()}: {e}"
-                )
+            except Exception:
+                pass
 
             gt.append(
                 {
@@ -199,109 +166,122 @@ def collect_cylinder_ground_truth(stage):
     return gt
 
 
-def save_ground_truth_for_snapshot(stage, frame_index, snapshot_filename, out_dir):
-    """
-    Save a JSON file with ground truth data for cylinders in this frame.
+def get_robot_position(stage, robot_path):
+    prim = stage.GetPrimAtPath(robot_path)
+    if not prim.IsValid():
+        return None
+    return get_prim_translation(prim)
 
-    File name: scene_XXXX_gt.json (aligned with USD snapshot).
+
+# ----------------------------------------
+# NEW: Validation Logic
+# ----------------------------------------
+def validate_scene(stage, config):
     """
+    Returns (is_valid, cylinder_data)
+    Constraints:
+    1. No object (robot or cylinder) within x=[-1, 1] AND y=[-1, 1].
+    2. Not all cylinders have the same color.
+    """
+
+    # --- Check Robot Position ---
+    robot_pos = get_robot_position(stage, config["robot_prim"])
+    if robot_pos:
+        rx, ry = robot_pos[0], robot_pos[1]
+        # Check exclusion zone: if inside x +/- 1.0 AND y +/- 1.0
+        if -1.0 < rx < 1.0 and -1.0 < ry < 1.0:
+            return False, "Robot inside exclusion zone"
+
+    # --- Check Cylinders ---
     cylinders = collect_cylinder_ground_truth(stage)
+    colors_seen = set()
+
+    for cyl in cylinders:
+        cx, cy = cyl["position"][0], cyl["position"][1]
+
+        # 1. Exclusion Zone Check
+        if -1.0 < cx < 1.0 and -1.0 < cy < 1.0:
+            return False, f"Cylinder at ({cx:.2f}, {cy:.2f}) inside exclusion zone"
+
+        # Collect color for next check (convert list to tuple for set hashing)
+        if cyl["color"]:
+            # Rounding to 3 decimal places to avoid float precision mismatches
+            c_tuple = tuple(round(c, 3) for c in cyl["color"])
+            colors_seen.add(c_tuple)
+
+    # 2. Color Uniformity Check
+    # If we found colors, but the set length is only 1, they are all the same
+    if len(cylinders) > 0 and len(colors_seen) <= 1:
+        return False, "All cylinders have the same color"
+
+    return True, cylinders
+
+
+def save_ground_truth_for_snapshot(
+    cylinder_data, frame_index, snapshot_filename, out_dir
+):
     data = {
         "frame_index": int(frame_index),
         "scene_usd": snapshot_filename,
-        "cylinders": cylinders,
+        "cylinders": cylinder_data,
     }
-
     gt_filename = f"scene_{frame_index:04d}_gt.json"
     gt_path = os.path.join(out_dir, gt_filename)
-
     with open(gt_path, "w") as f:
         json.dump(data, f, indent=2)
-
     print(f"[GT] Saved ground truth: {gt_path}")
 
 
 # ----------------------------------------
-# Create cylinders ONCE in the scene
+# Scene Setup
 # ----------------------------------------
 def create_cylinders(config):
     area = config["spawn_area"]
     count = config["objects_per_frame"]
-
     with rep.create.cylinder(
         count=count,
         position=rep.distribution.uniform(
             (area["xmin"], area["ymin"], area["z"]),
             (area["xmax"], area["ymax"], area["z"]),
         ),
-        scale=rep.distribution.uniform(
-            (0.05, 0.05, 1.0),
-            (0.15, 0.15, 1.0),
-        ),
+        scale=rep.distribution.uniform((0.05, 0.05, 1.0), (0.15, 0.15, 1.0)),
         rotation=rep.distribution.uniform((0.0, 0.0, 0.0), (0.0, 0.0, 360.0)),
         semantics={"class": "Cylinder"},
         name="training_cylinder",
         as_mesh=True,
         visible=True,
     ) as cylinders:
-
         rep.physics.collider(approximation_shape="convexHull")
         rep.physics.rigid_body()
-
-    # IMPORTANT: we just created them once; we'll randomize them later
     return cylinders
 
 
-# ----------------------------------------
-# Randomize pose + material of EXISTING cylinders
-# ----------------------------------------
-def register_cylinder_randomizer(config, cylinders):
-
+def register_randomizers(config, cylinders, stage):
     area = config["spawn_area"]
     count = config["objects_per_frame"]
+    robot_path = config.get("robot_prim", "/World/turtlebot4")
 
-    # Precompute a list of RGB colors from HTML4 named colors
+    # Colors
     colors = [webcolors.name_to_rgb(name) for name in webcolors.names("html4")]
     colors = [(c.red / 255.0, c.green / 255.0, c.blue / 255.0) for c in colors]
 
     def randomize_existing_cylinders():
-        # Reposition, re-rotate, re-scale, recolor the same cylinders each frame
         with cylinders:
             rep.modify.pose(
                 position=rep.distribution.uniform(
                     (area["xmin"], area["ymin"], area["z"]),
                     (area["xmax"], area["ymax"], area["z"]),
                 ),
-                rotation=rep.distribution.uniform(
-                    (0.0, 0.0, 0.0),
-                    (0.0, 0.0, 360.0),
-                ),
-                scale=rep.distribution.uniform(
-                    (0.05, 0.05, 1.0),
-                    (0.15, 0.15, 1.0),
-                ),
+                rotation=rep.distribution.uniform((0.0, 0.0, 0.0), (0.0, 0.0, 360.0)),
+                scale=rep.distribution.uniform((0.05, 0.05, 1.0), (0.15, 0.15, 1.0)),
             )
             mats = rep.create.material_omnipbr(
-                diffuse=rep.distribution.choice(colors),
-                count=count,
+                diffuse=rep.distribution.choice(colors), count=count
             )
             rep.randomizer.materials(mats)
-
         return cylinders.node
 
-    rep.randomizer.register(randomize_existing_cylinders)
-
-
-# ----------------------------------------
-# Randomize pose (position + yaw) of TurtleBot4 robot
-# ----------------------------------------
-def register_robot_randomizer(config, stage):
-
-    robot_path = config.get("robot_prim", "/World/turtlebot4")
-    area = config["spawn_area"]
-
     def randomize_robot_pose():
-        # Randomize robot XY and yaw, keep Z constant
         robot_prims = rep.get.prim_at_path(robot_path)
         with robot_prims:
             rep.modify.pose(
@@ -309,79 +289,74 @@ def register_robot_randomizer(config, stage):
                     (area["xmin"], area["ymin"], -0.75),
                     (area["xmax"], area["ymax"], -0.7),
                 ),
-                # Only yaw around Z; roll/pitch remain zero
-                rotation=rep.distribution.uniform(
-                    (0.0, 0.0, 0.0),
-                    (0.0, 0.0, 360.0),
-                ),
+                rotation=rep.distribution.uniform((0.0, 0.0, 0.0), (0.0, 0.0, 360.0)),
             )
-
         return robot_prims.node
 
+    rep.randomizer.register(randomize_existing_cylinders)
     rep.randomizer.register(randomize_robot_pose)
 
 
 # ----------------------------------------
-# Create a base scene in snapshot dir (fixes TB4 relative paths)
+# Initialization
 # ----------------------------------------
 stage = load_scene(CONFIG["scene_path"])
 os.makedirs(CONFIG["scene_snapshot_dir"], exist_ok=True)
 
 new_scene_path = os.path.join(CONFIG["scene_snapshot_dir"], "base_scene.usd")
 omni.usd.get_context().save_as_stage(new_scene_path)
-print(f"[Scene] Saved base scene: {new_scene_path}")
-
-# After save_as_stage, the context now points to base_scene.usd
 stage = omni.usd.get_context().get_stage()
 
-# Set up cameras & writer on the base scene:
 render_products = setup_cameras_and_writer(CONFIG)
-
-# Create cylinders once
 cylinders = create_cylinders(CONFIG)
+register_randomizers(CONFIG, cylinders, stage)
 
-# Register randomizers
-register_cylinder_randomizer(CONFIG, cylinders)
-register_robot_randomizer(CONFIG, stage)
-
-# ----------------------------------------
-# Register SDG and run per-frame
-# ----------------------------------------
 with rep.trigger.on_frame():
     rep.randomizer.randomize_existing_cylinders()
     rep.randomizer.randomize_robot_pose()
 
-print(f"[SDG] Generating {CONFIG['num_frames']} frames")
 
-for i in range(CONFIG["num_frames"]):
-    # Run randomizers + writers for this frame
+# ----------------------------------------
+# Main Loop (Filtered)
+# ----------------------------------------
+valid_frames_generated = 0
+target_frames = CONFIG["num_frames"]
+
+print(f"[SDG] Starting generation. Target: {target_frames} valid frames.")
+
+while valid_frames_generated < target_frames:
+    # 1. Step the physics/randomizer
+    # Note: This technically triggers the Writer to write images for *this* step.
+    # If the frame is invalid, we simply won't save the matching USD/JSON.
     rep.orchestrator.step(rt_subframes=CONFIG["rt_subframes"], delta_time=1.0 / 60.0)
 
-    # Use a consistent name for snapshot
-    snapshot_filename = f"scene_{i:04d}.usd"
-    snapshot_path = os.path.join(
-        CONFIG["scene_snapshot_dir"],
-        snapshot_filename,
-    )
-
-    # Current stage reflects this frame – export it
+    # 2. Update stage reference and validate
     stage = omni.usd.get_context().get_stage()
+    is_valid, validation_result = validate_scene(stage, CONFIG)
 
-    # --- Save ground truth BEFORE stripping Replicator graph ---
+    if not is_valid:
+        print(f"[Skip] Invalid frame: {validation_result}")
+        continue  # Skip saving, do not increment counter
+
+    # 3. Save Valid Data
+    snapshot_filename = f"scene_{valid_frames_generated:04d}.usd"
+    snapshot_path = os.path.join(CONFIG["scene_snapshot_dir"], snapshot_filename)
+
+    # Save GT (passing the data we already collected during validation)
+    # validation_result contains the cylinder list if is_valid is True
     save_ground_truth_for_snapshot(
-        stage,
-        frame_index=i,
+        validation_result,
+        frame_index=valid_frames_generated,
         snapshot_filename=snapshot_filename,
         out_dir=CONFIG["scene_snapshot_dir"],
     )
 
-    # Export the current composed stage (with SDG graph still present)
+    # Export USD
     stage.GetRootLayer().Export(snapshot_path)
-
-    # Now strip the Replicator/SDG graph from the *file* so it's static
     strip_replicator_graph_from_file(snapshot_path)
 
-    print(f"[Scene] Saved baked snapshot: {snapshot_path}")
+    print(f"[Scene] Saved frame {valid_frames_generated}: {snapshot_path}")
+    valid_frames_generated += 1
 
 rep.orchestrator.wait_until_complete()
 print(f"[DONE] Output saved to {CONFIG['writer_config']['output_dir']}")
