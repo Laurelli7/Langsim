@@ -40,7 +40,6 @@ def run_sim(scene_id: str):
             sim.world.step(render=True)
         except Exception as e:
             print(f"Error during step: {e}")
-            # Optional: Decide if you want to break or continue
 
 
 if __name__ == "__main__":

@@ -28,7 +28,7 @@ class SimControlNode(Node):
         self.reset_client = self.create_client(ResetSimulation, "/reset_simulation")
         self.load_world_client = self.create_client(LoadWorld, "/load_world")
 
-        # Wait for services (best-effort)
+        # Wait for services
         for client, name in [
             (self.set_state_client, "/set_simulation_state"),
             (self.reset_client, "/reset_simulation"),
@@ -64,7 +64,7 @@ class SimControlNode(Node):
 
 
 # ------------------------------------------------------------------------------
-# Entry point - run 5 times per scene, automate world & sim control
+# Main entry point
 # ------------------------------------------------------------------------------
 def main():
     rclpy.init()

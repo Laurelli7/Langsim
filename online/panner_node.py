@@ -253,7 +253,7 @@ class PlannerNode(Node):
         self.finish_episode()
 
     # ----------------------------------------------------------------------
-    # Write logs (no shutdown here)
+    # Write logs
     # ----------------------------------------------------------------------
     def finish_episode(self):
         self.log_data["dialogue"] = self.planner.history

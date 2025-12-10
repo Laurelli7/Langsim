@@ -3,7 +3,6 @@ import os
 import math
 import numpy as np
 
-# Isaac Sim imports (AFTER SimulationApp is created in your main script)
 import omni.usd
 from isaacsim.core.utils.stage import open_stage
 from isaacsim.core.api import World
