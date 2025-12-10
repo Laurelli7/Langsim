@@ -20,8 +20,10 @@ class HumanOracle:
             print("\n=== HUMAN ORACLE MODE ===")
             print(f"Robot Position: {robot_pos}")
             print("Question:", question)
-            print("Target:", json.dumps(self.target, indent=2))
-            print("Cylinders:", json.dumps(self.gt_data["cylinders"], indent=2))
+            if self.target and self.gt_data:
+                print("Target:", json.dumps(self.target, indent=2))
+                print("Cylinders:", json.dumps(self.gt_data["cylinders"], indent=2))
+
             return input("Enter your advice to the robot: ")
 
         # Otherwise, use the LLM mode
