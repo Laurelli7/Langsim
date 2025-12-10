@@ -188,6 +188,21 @@ You have access to the following helper functions (imported via `from helpers im
        * area: current blob area (0 if not found).
    - Non-blocking: caller must handle timeouts, stopping conditions, and switching states.
 
+7. get_lidar_ranges(scan_msg, max_val=10.0, min_safe=0.15) -> list
+   - Returns a processed list of LIDAR distances from the raw LaserScan message.
+   - Replaces values that are infinite or below min_safe (0.15 m) with max_val (default 10.0).
+   - The resulting list typically contains 1080 values, where index 0 is the robot's Right and index 270 is Front.
+
+8. get_nearest_front_distance(scan_msg, error=30) -> float
+   - Finds the closest object in a specific slice directly in front of the robot.
+   - Scans indices centered at 270 (Front) with a margin of +/- error (default 30 indices).
+   - Returns the minimum valid distance found; returns 10.0 if all readings are infinite or too close (noise).
+
+9. get_scan_range_by_degree(scan_msg, start_degree, end_degree, max_val=10.0, min_safe=0.15) -> list
+   - Returns a cleaned list of LIDAR distances for a specific angular range (in degrees).
+   - Maps 0 degrees to the robot's Right side, increasing counter-clockwise (approx. 3 indices per degree).
+   - Applies the same cleaning logic as get_lidar_ranges to handle infinite or noisy readings.
+
 Important constraints:
 - These helper functions do NOT handle time.sleep or durations internally; they are single-step controllers.
 - In your generated code, use ROS 2 timers or a main loop to call these functions at a fixed rate and implement
