@@ -36,6 +36,7 @@ class HumanOracle:
             f"TARGET OBJECT: {target_info}. "
             "- Guide the robot to the target. Give brief, one-sentence, natural language directions as a human operator."
             "- Nav planning is priority, low-level control advice is supplemental. "
+            "- If the target is blocked, suggest how to reach the target step by step. In particularly complex scenarios, suggest robot to come back for more feedback after a step. "
             "- The robot doesn't have the ceiling camera view, so give advice relative to robot position and direction instead of global up-down and left-right."
         )
 
@@ -189,7 +190,7 @@ Important constraints:
 - These helper functions do NOT handle time.sleep or durations internally; they are single-step controllers.
 - In your generated code, use ROS 2 timers or a main loop to call these functions at a fixed rate and implement
   higher-level behaviors (search, approach, etc.) as a simple state machine.
-- When hitting obstacles, you can always rotate and avoid it in place as the turtlebot is in circular shape.
+- When using lidar scans, make sure to ignore invalid readings outside of [0.2, 10.0] meters, such as NaN, inf or -1.0.
 
 Color detection helpers:
 - You are given loose HSV bounds for several HTML4 color names, suitable for OpenCV-based color detection.
@@ -200,7 +201,7 @@ Color detection helpers:
 ```python
 COLOR_BOUNDS = {{
     'aqua':    {{'lower': (70, 205, 205), 'upper': (110, 255, 255)}},
-    'black':   {{'lower': (0,   0,   0),  'upper': (180, 255, 110)}},
+    'black':   {{'lower': (0,   0,   0),  'upper': (180, 255, 80)}},
     'blue':    {{'lower': (100, 205, 205),'upper': (140, 255, 255)}},
     'fuchsia': {{'lower': (130, 205, 205),'upper': (170, 255, 255)}},
     'green':   {{'lower': (40,  105,   0),'upper': (80,  255, 178)}},

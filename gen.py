@@ -36,6 +36,8 @@ CONFIG = {
     "robot_prim": "/World/turtlebot4",
 }
 
+COLORS = ['black', 'blue', 'green', 'purple', 'yellow']
+
 simulation_app = SimulationApp(CONFIG["launch_config"])
 
 import omni.usd
@@ -211,7 +213,7 @@ def validate_scene(stage, config):
 
     # 2. Color Uniformity Check
     # If we found colors, but the set length is only 1, they are all the same
-    if len(cylinders) > 0 and len(colors_seen) <= 1:
+    if len(cylinders) > 0 and len(colors_seen) <= 2:
         return False, "All cylinders have the same color"
 
     return True, cylinders
@@ -262,7 +264,7 @@ def register_randomizers(config, cylinders, stage):
     robot_path = config.get("robot_prim", "/World/turtlebot4")
 
     # Colors
-    colors = [webcolors.name_to_rgb(name) for name in webcolors.names("html4")]
+    colors = [webcolors.name_to_rgb(name) for name in COLORS]
     colors = [(c.red / 255.0, c.green / 255.0, c.blue / 255.0) for c in colors]
 
     def randomize_existing_cylinders():

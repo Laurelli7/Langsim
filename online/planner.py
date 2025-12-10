@@ -328,7 +328,7 @@ def main():
 
     # Configure your scenes here:
     # e.g. ["0000", "0001", "0002"]
-    scene_ids = ["0001", "0002"]
+    scene_ids = [f"{i:04d}" for i in range(10, 15)]
     runs_per_scene = 2
 
     sim_control = SimControlNode()

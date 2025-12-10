@@ -7,7 +7,7 @@ from cv_bridge import CvBridge
 
 COLOR_BOUNDS = {
     "aqua": {"lower": (70, 205, 205), "upper": (110, 255, 255)},
-    "black": {"lower": (0, 0, 0), "upper": (180, 255, 110)},
+    "black": {"lower": (0, 0, 0), "upper": (180, 255, 80)},
     "blue": {"lower": (100, 205, 205), "upper": (140, 255, 255)},
     "fuchsia": {"lower": (130, 205, 205), "upper": (170, 255, 255)},
     "green": {"lower": (40, 105, 0), "upper": (80, 255, 178)},
