@@ -79,7 +79,7 @@ from helpers import *
 TOPIC_CMD_VEL = os.getenv("TOPIC_CMD_VEL", "/cmd_vel")
 TOPIC_SCAN = os.getenv("TOPIC_SCAN", "/scan")
 TOPIC_CAMERA = os.getenv("TOPIC_CAMERA", "/camera_rgb")
-ROBOT_FRONT_ANGLE = float(os.getenv("ROBOT_FRONT_ANGLE", "0.0"))  # in radians
+ROBOT_FRONT_INDEX = int(os.getenv("ROBOT_FRONT_INDEX", "270"))  # LiDar Index
 
 class FindCylinder(Node):
     def __init__(self):
@@ -218,6 +218,7 @@ COLOR_BOUNDS = {{
     'teal':    {{'lower': (70,  105,   0),'upper': (110, 255, 178)}},
     'white':   {{'lower': (0,   0,  105), 'upper': (180, 130, 255)}},
     'yellow':  {{'lower': (10,  205, 205),'upper': (60,  255, 255)}},
+    "orange": {{"lower": (4.288, 45.9, 232.05), "upper": (10.57, 216.75, 247.35)}},
 }}
 ```
 """

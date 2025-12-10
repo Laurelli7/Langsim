@@ -227,6 +227,7 @@ def main(args=None):
         node.get_logger().info("Keyboard Interrupt detected. Shutting down...")
     except Exception as e:
         node.get_logger().error(f"Unexpected error: {e}")
+        raise e
     finally:
         node.destroy_node()
         rclpy.shutdown()
