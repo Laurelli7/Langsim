@@ -112,12 +112,6 @@ The `langsim.py` script produces a `log_{id}.json` file for every episode contai
 }
 ```
 
-## 5\. Future Work
-
-  * **Fine-tuning:** The logs in `dataset_logs` will be used to fine-tune a smaller VLM (e.g., LLaVA or a distilled model) to act as the Planner *without* needing GPT-4o or the Python code generation step (end-to-end control).
-  * **RL Integration:** Using the generated code snippets as "expert demonstrations" for Imitation Learning.
-
-
 ## 6\. Final Writeup
 ## Project Description
 Langsim is a human-VLM (Vision-Language Model) collaboration framework designed to enable natural language planning for ROS 2 robots. The goal of this project is to lower the barrier for human-robot interaction by allowing users to control a robot, such as a TurtleBot 4, using natural language or voice commands. This project is particularly interesting because it leverages the code generation and transformation capabilities of Multimodal LLMs to analyze visual and text inputs and dynamically plan tasks, rather than relying on static action primitives.
