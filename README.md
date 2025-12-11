@@ -119,10 +119,6 @@ The `langsim.py` script produces a `log_{id}.json` file for every episode contai
 
 
 ## 6\. Final Writeup
-***
-
-# Langsim
-
 ## Project Description
 Langsim is a human-VLM (Vision-Language Model) collaboration framework designed to enable natural language planning for ROS 2 robots. The goal of this project is to lower the barrier for human-robot interaction by allowing users to control a robot, such as a TurtleBot 4, using natural language or voice commands. This project is particularly interesting because it leverages the code generation and transformation capabilities of Multimodal LLMs to analyze visual and text inputs and dynamically plan tasks, rather than relying on static action primitives.
 
@@ -148,7 +144,6 @@ We faced significant difficulties with the **NVIDIA Isaac Sim** and **Replicator
 Additionally, **human-in-the-loop data generation** proved to be slow and complicated, as the requirement for constant human presence bottlenecked the data collection process.
 
 ## Future Work
-Moving forward, we plan to:
 * Assess how human emotions affect model performance and exploratory incentives during collaboration.
 * Generalize this framework to more complicated tasks, such as multi-room navigation (logistics) and pick-and-place operations for medical or surgical applications.
 * Investigate the possibilities of a collaborative agentic framework in VLM robot manipulation, which remains a key research question.
