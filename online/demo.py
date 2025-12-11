@@ -22,10 +22,13 @@ from .core.executor import execute_ros2_code
 # ------------------------------------------------------------------
 # Configuration via Environment Variables
 # ------------------------------------------------------------------
-TOPIC_CMD_VEL = os.getenv("TOPIC_CMD_VEL", "/cmd_vel")
-TOPIC_SCAN = os.getenv("TOPIC_SCAN", "/scan")
-TOPIC_CAMERA = os.getenv("TOPIC_CAMERA", "/camera_rgb")
-ROBOT_FRONT_ANGLE = float(os.getenv("ROBOT_FRONT_ANGLE", "0.0"))  # in radians
+from dotenv import load_dotenv
+load_dotenv()
+
+CMD_VEL_TOPIC = os.getenv("CMD_VEL_TOPIC", "/cmd_vel")
+LIDAR_TOPIC = os.getenv("LIDAR_TOPIC", "/scan")
+IMAGE_TOPIC = os.getenv("IMAGE_TOPIC", "/camera_rgb")
+ROBOT_FRONT_INDEX = float(os.getenv("ROBOT_FRONT_INDEX", "0.0"))  # in radians
 
 
 class InteractivePlannerNode(Node):
@@ -43,7 +46,7 @@ class InteractivePlannerNode(Node):
         # Initialize Planner
         # -----------------------
         self.get_logger().info(f"[PLANNER] Goal: {self.goal_description}")
-        self.get_logger().info(f"[CONFIG] Camera: {TOPIC_CAMERA}, Cmd: {TOPIC_CMD_VEL}")
+        self.get_logger().info(f"[CONFIG] Camera: {IMAGE_TOPIC}, Cmd: {CMD_VEL_TOPIC}")
         self.planner = PlannerAgent(goal_description=self.goal_description)
 
         # -----------------------
@@ -63,11 +66,6 @@ class InteractivePlannerNode(Node):
             "scene": scene_id,
             "run_idx": run_idx,
             "goal": goal_description,
-            "config": {
-                "topic_cmd": TOPIC_CMD_VEL,
-                "topic_cam": TOPIC_CAMERA,
-                "front_angle": ROBOT_FRONT_ANGLE,
-            },
             "dialogue": [],
             "steps": [],
             "success": False,
@@ -75,14 +73,14 @@ class InteractivePlannerNode(Node):
         }
 
         # Publisher for stopping the robot between rounds
-        self.cmd_pub = self.create_publisher(Twist, TOPIC_CMD_VEL, 10)
+        self.cmd_pub = self.create_publisher(Twist, CMD_VEL_TOPIC, 10)
 
         # Ensure output directory exists
         os.makedirs(OUTPUT_DIR, exist_ok=True)
 
         self.get_logger().info("[PLANNER] Interactive Node initialized.")
 
-    def get_latest_image(self, topic=TOPIC_CAMERA, timeout_sec=2.0):
+    def get_latest_image(self, topic=IMAGE_TOPIC, timeout_sec=2.0):
         """
         Blocking call to get the latest image from the configured topic.
         """
@@ -111,11 +109,11 @@ class InteractivePlannerNode(Node):
             # -----------------------
             # Retrieve Ego Camera Frame
             # -----------------------
-            img_msg = self.get_latest_image(topic=TOPIC_CAMERA, timeout_sec=2.0)
+            img_msg = self.get_latest_image(topic=IMAGE_TOPIC, timeout_sec=2.0)
 
             if img_msg is None:
                 self.get_logger().warn(
-                    f"No image received from {TOPIC_CAMERA}. Retrying..."
+                    f"No image received from {IMAGE_TOPIC}. Retrying..."
                 )
                 time.sleep(0.5)
                 continue
@@ -225,6 +223,7 @@ def main(args=None):
         node.run_episode()
     except KeyboardInterrupt:
         node.get_logger().info("Keyboard Interrupt detected. Shutting down...")
+        node.finish_episode()
     except Exception as e:
         node.get_logger().error(f"Unexpected error: {e}")
         raise e

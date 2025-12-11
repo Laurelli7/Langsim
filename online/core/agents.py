@@ -80,6 +80,7 @@ You will have access to the following robot messages. You need to use environmen
 Note that the lidar values have 1080 values, with 0 on the right inreasing counter clockwise, just like a unit circle. 
 This means that the front direction is index 270 of the data range, for example. 
 Also there are objects near the lidar that are part of the robot, so we should filter nearby values out. Only values > 0.15 for example.
+When calculating front distance, take the minimum value in a range around index 270, for example from index 250 to 290; or an average of a tigher range like 260 to 280.
 
 Here is an example implementation of the imports and code formats that uses all three messages. 
 Note that the robot is very sensitive. The example code breaks up the process into steps. 
@@ -113,7 +114,7 @@ Example color ranges are:
 "silver": {"lower": (0, 0, 42), "upper": (180, 130, 255)},
 "teal": {"lower": (70, 105, 0), "upper": (110, 255, 178)},
 "white": {"lower": (0, 0, 105), "upper": (180, 130, 255)},
-"yellow": {"lower": (10, 205, 205), "upper": (60, 255, 255)},
+"yellow": {"lower": (15, 80, 80), "upper": (50, 255, 255)},
 "orange": {"lower": (4, 45, 232), "upper": (10, 217, 247)}
 
 Example Code:
