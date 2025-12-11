@@ -66,11 +66,16 @@ class PlannerAgent:
         self.history = []
         self.goal_description = goal_description
         self.system_prompt = """
-You are generating code for a turtlebot4 running ros2 using Python.
-    Do not generate anything else besides Python. You will have access to 3 robot messages.
-    You need to use environment variables to choose the topic names. which are: 
+You are a robot planner programing a turtlebot4 running ros2 using Python.
+Given the task and camera input, you need to determine if you need to ask for human help or write code to move the robot.
+
+- You are encouraged to ask for human help if you're unsure, or need more information, just respond with a short question in 1-2 sentences.
+- If you are sufficiently confident with writing the code to complete the task, respond with Python code that uses ROS2 to control the robot.
+
+You will have access to the following robot messages. You need to use environment variables to choose the topic names. which are: 
     - Subscribe to RGB Camera with topic os.getenv('IMAGE_TOPIC')
     - Subscribe to lidar with topic os.getenv('LIDAR_TOPIC')
+    - Subscribe to odometry with topic os.getenv('ODOM_TOPIC')
     - Publish to robot movement with os.getenv('CMD_VEL_TOPIC')
 Note that the lidar values have 1080 values, with 0 on the right inreasing counter clockwise, just like a unit circle. 
 This means that the front direction is index 270 of the data range, for example. 
@@ -85,18 +90,19 @@ steps and verifies precision like the example script.
 
 For every subsequent task we need to evaluate the success of the task completion. 
 If you complete the task (for example, found and reached a blue cylinder) print "TASK_RESULT:SUCCESS" using self.get_logger().info(''). 
-If the task cannot be completed within a reasonable amount of time (for example, cannot find a blue cylinder within 20 seconds), 
+If the task cannot be completed within a reasonable amount of time (for example, cannot find a blue cylinder within 90 seconds), 
 print "TASK_RESULT:FAIL" using self.get_logger().info('') and stop. 
 
 Always generate Python code in a code block.
 
 Example color ranges are:
 
+"pink": {"lower": (140,  50,  50), "upper": (179, 255, 255)},
 "aqua": {"lower": (70, 205, 205), "upper": (110, 255, 255)},
 "black": {"lower": (0, 0, 0), "upper": (180, 255, 80)},
-"blue": {"lower": (100, 205, 205), "upper": (140, 255, 255)},
+"blue": {"lower": (80, 50, 50), "upper": (140, 255, 255)},
 "fuchsia": {"lower": (130, 205, 205), "upper": (170, 255, 255)},
-"green": {"lower": (40, 105, 0), "upper": (80, 255, 178)},
+"green": {"lower": (30, 105, 100), "upper": (80, 255, 255)},
 "gray": {"lower": (0, 0, 0), "upper": (180, 130, 178)},
 "lime": {"lower": (40, 205, 205), "upper": (80, 255, 255)},
 "maroon": {"lower": (0, 105, 0), "upper": (20, 255, 178)},
@@ -110,7 +116,9 @@ Example color ranges are:
 "yellow": {"lower": (10, 205, 205), "upper": (60, 255, 255)},
 "orange": {"lower": (4, 45, 232), "upper": (10, 217, 247)}
 
-```
+Example Code:
+
+```python
 import rclpy
 from rclpy.node import Node
 
@@ -125,6 +133,7 @@ import os
 
 import time
 
+# Load topic names from environment variables
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -234,7 +243,7 @@ class ExecutePolicy(Node):
             msg1.angular.z = -0.001 * err_x
 
             self.publisher_.publish(msg1)
-            self.get_logger().info(f'Found color \{self.find_color\}! With error \{err_x\}.')
+            self.get_logger().info(f'Found color {self.find_color}! With error {err_x}.')
             # Increment consecutive ready if low enough error
             if abs(err_x) <= 10:
                 self.consec_ready += 1
@@ -243,7 +252,7 @@ class ExecutePolicy(Node):
             msg1 = Twist()
             msg1.angular.z = 0.3
             self.publisher_.publish(msg1)
-            self.get_logger().info(f'Searching for \{self.find_color\}...')
+            self.get_logger().info(f'Searching for {self.find_color}...')
             self.consec_ready = 0
         
         # Move on to next phase if facing the color 20 iterations in a row (means ready)
@@ -305,7 +314,7 @@ class ExecutePolicy(Node):
             msg1.linear.x = (self.front_dist - 0.35) / 2.5
 
             self.publisher_.publish(msg1)
-            self.get_logger().info(f'Moving towards \{self.find_color\} with speed \{msg1.linear.x\}! Distance: \{self.front_dist\}.')
+            self.get_logger().info(f'Moving towards {self.find_color} with speed {msg1.linear.x}! Distance: {self.front_dist}.')
             # Increment consecutive ready if low enough error
             if abs(msg1.linear.x) <= 0.02:
                 self.consec_ready += 1
@@ -350,8 +359,12 @@ if __name__ == '__main__':
 ```
 """
 
-        self.history.extend([{"role": "system", "content": self.system_prompt},
-                            {"role": "user", "content": self.goal_description}])
+        self.history.extend(
+            [
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": self.goal_description},
+            ]
+        )
 
     def think(self, ego_image_b64, human_hint=None):
         messages = []

@@ -1,4 +1,6 @@
 import subprocess
+import os
+import sys
 
 
 def execute_ros2_code(code_str, filename="generated_code.py", timeout_sec=120.0):
@@ -23,13 +25,16 @@ def execute_ros2_code(code_str, filename="generated_code.py", timeout_sec=120.0)
         f.write(code_str)
 
     print(">>> Executing ROS 2 Code...")
+    
+    env = os.environ.copy()
 
     try:
         subprocess.run(
-            ["/usr/bin/python3", filename],
+            [sys.executable, filename],
             text=True,
             timeout=timeout_sec,
             check=True,
+            env=env,
         )
 
     except Exception as e:
