@@ -116,3 +116,44 @@ The `langsim.py` script produces a `log_{id}.json` file for every episode contai
 
   * **Fine-tuning:** The logs in `dataset_logs` will be used to fine-tune a smaller VLM (e.g., LLaVA or a distilled model) to act as the Planner *without* needing GPT-4o or the Python code generation step (end-to-end control).
   * **RL Integration:** Using the generated code snippets as "expert demonstrations" for Imitation Learning.
+
+
+## 6\. Final Writeup
+***
+
+# Langsim
+
+## Project Description
+Langsim is a human-VLM (Vision-Language Model) collaboration framework designed to enable natural language planning for ROS 2 robots. The goal of this project is to lower the barrier for human-robot interaction by allowing users to control a robot, such as a TurtleBot 4, using natural language or voice commands. This project is particularly interesting because it leverages the code generation and transformation capabilities of Multimodal LLMs to analyze visual and text inputs and dynamically plan tasks, rather than relying on static action primitives.
+
+We successfully implemented a system where a robot can interpret a high-level command like *"Find and move to the blue cylinder."* If the robot fails (e.g., returns `TASK_RESULT:FAIL`), the framework supports human-in-the-loop guidance. A user can provide a corrective prompt, such as *"If you move to the pink cylinder first... you should be able to find and reach the blue cylinder,"* which allows the robot to update its plan and succeed.
+
+### Main Components
+* **Human Supervisor (Oracle):** Provides natural language guidance, queries, and ground truth information (e.g., map, target).
+* **VLM-Based Planner Agent:** Acts as the reasoning layer. It decides whether to "Ask" for help or "Code" a solution. It integrates visual perception (egocentric RGB images) and robot state to generate Python code.
+* **ROS 2 Execution Environment:** The generated code is executed on the robot (TurtleBot 4), sending commands to topics like `/cmd_vel`.
+* **Simulation & Offline Learning:** NVIDIA Isaac Sim and Replicator were used to generate synthetic datasets of Python scripts to fine-tune the model for spatial reasoning and interactiveness.
+
+## System Architecture
+The Langsim architecture operates as a four-stage inference pipeline:
+
+1.  **Voice Input:** The user speaks a natural language command via a microphone.
+2.  **VLM Planning:** A fine-tuned VLM (e.g., Qwen-VL or Mistral 3) analyzes the user's intent and the current visual state from the robot's camera. It acts as a high-level planner, deciding if it has enough information to act or if it needs to query the human.
+3.  **Code Generation:** The model generates specific ROS 2 Python nodes to execute the identified subtask. For example, to find an object, it might generate a class like `FindCylinder(Node)` that subscribes to the camera and scan data.
+4.  **Action & Feedback:** The TurtleBot executes the generated plan in the environment. The generated code is designed to be deterministic, printing results like `TASK_RESULT:SUCCESS` or `TASK_RESULT:FAIL`. If a failure occurs, the robot prompts the human for guidance, closing the loop.
+
+## Challenges
+We faced significant difficulties with the **NVIDIA Isaac Sim** and **Replicator** workflows. The Omniverse API is deprecated, and many community resources (such as documentation for camera projection matrices) have not been updated, making simulation setup harder than anticipated.
+
+Additionally, **human-in-the-loop data generation** proved to be slow and complicated, as the requirement for constant human presence bottlenecked the data collection process.
+
+## Future Work
+Moving forward, we plan to:
+* Assess how human emotions affect model performance and exploratory incentives during collaboration.
+* Generalize this framework to more complicated tasks, such as multi-room navigation (logistics) and pick-and-place operations for medical or surgical applications.
+* Investigate the possibilities of a collaborative agentic framework in VLM robot manipulation, which remains a key research question.
+
+## Takeaways
+* **Human Guidance is Critical:** LLMs can "hallucinate" or fail on spatial tasks, but simple human hints can effectively unblock them.
+* **Simulation vs. Real World:** Transferring simulation results to a real robot remains a major risk and challenge due to physical discrepancies.
+* **Code Gen over Primitives:** Generating dynamic ROS 2 code offers greater flexibility than mapping to fixed action primitives, though it requires robust safety checks.
