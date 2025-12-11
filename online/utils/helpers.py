@@ -23,6 +23,7 @@ COLOR_BOUNDS = {
     "teal": {"lower": (70, 105, 0), "upper": (110, 255, 178)},
     "white": {"lower": (0, 0, 105), "upper": (180, 130, 255)},
     "yellow": {"lower": (10, 205, 205), "upper": (60, 255, 255)},
+    "orange": {"lower": (4, 45, 232), "upper": (10, 217, 247)}
 }
 
 
@@ -102,9 +103,6 @@ def find_colored_blob(cv_image, lower_hsv, upper_hsv, min_area=500):
 
     largest = max(contours, key=cv2.contourArea)
     area = cv2.contourArea(largest)
-
-    if area < min_area:
-        return False, None, None, area
 
     M = cv2.moments(largest)
     if M["m00"] == 0:

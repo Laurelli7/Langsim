@@ -179,7 +179,8 @@ You have access to the following helper functions (imported via `from helpers im
                                 image_width, target_area=20000, linear_speed=0.18,
                                 k_angular=0.004, min_area=200, active=True)
    - ONE CONTROL STEP of approaching a colored object while trying to keep it centered in the image.
-   - The camera resolution is 250x250 pixels and a target area of 20000 roughly means being 0.8 meters away.
+   - The camera resolution is 250x250 pixels and a target area of 20000 roughly means a cylinder being 0.8 meters away.
+   - Use a smaller min_area such as 10 when looking for smaller objects such as a colored tape.
    - Uses the latest camera image to find the target blob and computes a Twist with forward motion plus
      an angular correction proportional to horizontal pixel error.
    - Returns (reached, found, area):
@@ -233,7 +234,7 @@ COLOR_BOUNDS = {{
     'teal':    {{'lower': (70,  105,   0),'upper': (110, 255, 178)}},
     'white':   {{'lower': (0,   0,  105), 'upper': (180, 130, 255)}},
     'yellow':  {{'lower': (10,  205, 205),'upper': (60,  255, 255)}},
-    "orange": {{"lower": (4.288, 45.9, 232.05), "upper": (10.57, 216.75, 247.35)}},
+    "orange":  {{"lower": (4, 45, 232), "upper": (10, 217, 247)}},
 }}
 ```
 """
