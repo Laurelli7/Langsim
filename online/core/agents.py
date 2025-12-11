@@ -1,6 +1,6 @@
 import json
 import re
-from ..constants import OPENAI_CLIENT
+from ..constants import OPENAI_CLIENT, MODEL
 
 import json
 
@@ -42,23 +42,49 @@ class HumanOracle:
             "- The robot doesn't have the ceiling camera view, so give advice relative to robot position and direction instead of global up-down and left-right."
         )
 
-        response = OPENAI_CLIENT.responses.create(
-            model="gpt-5-mini",
-            input=[
-                {"role": "system", "content": system_prompt},
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "input_text", "text": f"The robot asks: {question}"},
-                        {
-                            "type": "input_image",
-                            "image_url": f"data:image/jpeg;base64,{top_down_b64}",
-                        },
-                    ],
-                },
-            ],
-        )
-        return response.output_text
+        if not MODEL.startswith("gpt-"):
+            # Use Standard OpenAI Chat Completions API (e.g., for vLLM/Qwen)
+            response = OPENAI_CLIENT.chat.completions.create(
+                model=MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": f"The robot asks: {question}"},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{top_down_b64}"
+                                },
+                            },
+                        ],
+                    },
+                ],
+            )
+            return response.choices[0].message.content
+        else:
+            # Use Custom/Legacy Client
+            response = OPENAI_CLIENT.responses.create(
+                model=MODEL,
+                input=[
+                    {"role": "system", "content": system_prompt},
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": f"The robot asks: {question}",
+                            },
+                            {
+                                "type": "input_image",
+                                "image_url": f"data:image/jpeg;base64,{top_down_b64}",
+                            },
+                        ],
+                    },
+                ],
+            )
+            return response.output_text
 
 
 class PlannerAgent:
@@ -375,20 +401,45 @@ if __name__ == '__main__':
             messages.append({"role": "user", "content": human_hint})
             self.history.append({"role": "user", "content": human_hint})
         else:
-            msg = {
-                "role": "user",
-                "content": [
-                    {"type": "input_text", "text": "Current camera view."},
-                    {
-                        "type": "input_image",
-                        "image_url": f"data:image/jpeg;base64,{ego_image_b64}",
-                    },
-                ],
-            }
+            # Differentiate formatting between standard ChatCompletions and custom client
+            if not MODEL.startswith("gpt-"):
+                # Standard Chat Completion Format (vLLM/OpenAI Standard)
+                msg = {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Current camera view."},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{ego_image_b64}"
+                            },
+                        },
+                    ],
+                }
+            else:
+                # Legacy/Custom Client Format
+                msg = {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "Current camera view."},
+                        {
+                            "type": "input_image",
+                            "image_url": f"data:image/jpeg;base64,{ego_image_b64}",
+                        },
+                    ],
+                }
             messages.append(msg)
 
-        response = OPENAI_CLIENT.responses.create(model="gpt-5-mini", input=messages)
-        result_text = response.output_text
+        # Call the API
+        if not MODEL.startswith("gpt-"):
+            response = OPENAI_CLIENT.chat.completions.create(
+                model=MODEL, messages=messages
+            )
+            result_text = response.choices[0].message.content
+        else:
+            response = OPENAI_CLIENT.responses.create(model=MODEL, input=messages)
+            result_text = response.output_text
+
         self.history.append({"role": "assistant", "content": result_text})
 
         if "```python" in result_text:
