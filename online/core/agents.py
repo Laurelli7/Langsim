@@ -65,181 +65,269 @@ class PlannerAgent:
     def __init__(self, goal_description):
         self.history = []
         self.goal_description = goal_description
-        self.code_template = """
-```python
-import os
+        self.system_prompt = """
+        You are generating code for a turtlebot4 running ros2 using Python.
+                 Do not generate anything else besides Python. You will have access to 3 robot messages.
+                 You need to use environment variables to choose the topic names. which are: 
+                    - Subscribe to RGB Camera with topic os.getenv('IMAGE_TOPIC')
+                    - Subscribe to lidar with topic os.getenv('LIDAR_TOPIC')
+                    - Publish to robot movement with os.getenv('CMD_VEL_TOPIC')
+                Note that the lidar values have 1080 values, with 0 on the right inreasing counter clockwise, just like a unit circle. 
+                This means that the front direction is index 270 of the data range, for example. 
+                Also there are objects near the lidar that are part of the robot, so we should filter nearby values out. Only values > 0.15 for example.
+
+                Here is an example implementation of the imports and code formats that uses all three messages. 
+                Note that the robot is very sensitive. The example code breaks up the process into steps. 
+                First it aligns itself and confirms its aligned, then it moves towards the destination. 
+                There is real-world error and lag. Thus, if it didn't first align properly and instead moved immediately towards the color, the result
+                would result in missing the target. Therefore, your code should assume these errors, and make sure your solutions breaks it down into 
+                steps and verifies precision like the example script. 
+
+                For every subsequent task we need to evaluate the success of the task completion. 
+                If you complete the task (for example, found and reached a blue cylinder) print "TASK_RESULT:SUCCESS" using self.get_logger().info(''). 
+                If the task cannot be completed within a reasonable amount of time (for example, cannot find a blue cylinder within 20 seconds), 
+                print "TASK_RESULT:FAIL" using self.get_logger().info('') and stop. 
+
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Twist
+
 from sensor_msgs.msg import Image
-from cv_bridge import CvBridge
-from helpers import *
+from sensor_msgs.msg import LaserScan
+from geometry_msgs.msg import Twist
 
-# The following topics are available in the environment
-TOPIC_CMD_VEL = os.getenv("TOPIC_CMD_VEL", "/cmd_vel")
-TOPIC_SCAN = os.getenv("TOPIC_SCAN", "/scan")
-TOPIC_CAMERA = os.getenv("TOPIC_CAMERA", "/camera_rgb")
-ROBOT_FRONT_INDEX = int(os.getenv("ROBOT_FRONT_INDEX", "270"))  # LiDar Index
+import cv2
+import cv_bridge
+import numpy as np
+import os
 
-class FindCylinder(Node):
+import time
+
+from dotenv import load_dotenv
+load_dotenv()
+
+class ExecutePolicy(Node):
+
     def __init__(self):
-        super().__init__('find_cylinder')
+        super().__init__('example_move')
 
-        self.cmd_vel_pub = self.create_publisher(Twist, TOPIC_CMD_VEL, 10)
-        self._latest_image = None
-        self.image_width = None
+        # set up ROS / OpenCV bridge
+        self.bridge = cv_bridge.CvBridge()
 
-        self.create_subscription(
+        # initialize the debugging window
+        cv2.namedWindow("window", 1)
+
+        # Set attribute for phase, state, consecutive ready count, etc
+        self.phase = 0
+        self.state = 0
+        self.consec_ready = 0
+        self.front_dist = 0
+        self.find_color = "pink"
+
+        # subscribe to the robot's RGB camera data stream
+        self.image_sub = self.create_subscription(
             Image,
-            TOPIC_CAMERA,
+            os.getenv('IMAGE_TOPIC'),
             self.image_callback,
             10
         )
+        # subscribe to the robot's lidar
+        self.lidar_sub = self.create_subscription(
+            LaserScan,
+            os.getenv('LIDAR_TOPIC'),
+            self.lidar_callback,
+            10
+        )
+        # Create a publisher to the robots command velocity
+        self.publisher_ = self.create_publisher(
+            Twist, 
+            os.getenv('CMD_VEL_TOPIC'),
+            10
+        )
 
-        self.bridge = CvBridge()
-        
-        # Your state machine and logic goes here
-        self.state = ""
-        self.state_start_time = self.get_clock().now().nanoseconds / 1e9  # seconds
+    # Most of the logic will be done in image_callback. lidar_callback just sets some distance param
+    def lidar_callback(self, msg):
+        # We find the minimum distance in the near-front direction
+        # Ignore values of 0.15 or less since there are objects near the lidar
+        err = 40
+        start = 270 - err
+        stop = 270 + err
+        self.front_dist = 10
+        for i in range(start, stop):
+            if 0.15 < msg.ranges[i] < self.front_dist:
+                self.front_dist = msg.ranges[i]
 
-    def image_callback(self, msg: Image):
-        try:
-            self._latest_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
-            if self.image_width is None and self._latest_image is not None:
-                self.image_width = self._latest_image.shape[1]
-        except Exception as e:
-            self.get_logger().error(f"Failed to convert image: {e}")
-
-    def get_latest_image(self):
-        return self._latest_image
+    def image_callback(self, msg):
+        match self.phase:
+            case 0:
+                self.phase0_find_color(msg)
+            case 1:
+                self.phase1_to_color(msg)
     
-    # Your additional methods go here
+    def phase0_find_color(self, msg):
+        # converts the incoming ROS message to OpenCV format and HSV
+        image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
+        # pink
+        if self.find_color == "pink":
+            lower_color = np.array([156.38, 109.86, 150.35])
+            upper_color = np.array([162.66, 255.00, 165.65])
+        # green
+        elif self.find_color == "green":
+            lower_color = np.array([35, 90, 110])
+            upper_color = np.array([41, 140, 210])
+        # blue
+        elif self.find_color == "blue":
+            lower_color = np.array([93.64, 56.98, 146.35])
+            upper_color = np.array([99.93, 227.83, 161.65])
+
+        # erase all pixels that aren't that color
+        mask = cv2.inRange(hsv, lower_color, upper_color)
+
+        # limit the search to slice out the top 1/4
+        h, w, d = image.shape
+        search_top = int(h/4)
+        search_bot = h
+        mask[0:search_top, 0:w] = 0
+        mask[search_bot:h, 0:w] = 0
+
+        # draw a rectangle around the search box
+        cv2.rectangle(image, (0, search_top), (w, search_bot), (0, 0, 0), 1)
+
+        # calculate moments to find the center of color pixels
+        M = cv2.moments(mask)
+
+        # if there are any pixels found
+        if M['m00'] > 0:
+            cx = int(M['m10']/M['m00'])
+            cy = int(M['m01']/M['m00'])
+
+            # draw a red circle at the center
+            cv2.circle(image, (cx, cy), 20, (0, 0, 255), -1)
+
+            # Turn towards the color
+            err_x = cx - (w // 2)
+            msg1 = Twist()
+            msg1.angular.z = -0.001 * err_x
+
+            self.publisher_.publish(msg1)
+            self.get_logger().info(f'Found color \{self.find_color\}! With error \{err_x\}.')
+            # Increment consecutive ready if low enough error
+            if abs(err_x) <= 10:
+                self.consec_ready += 1
+        # else, we keep turning until we find something
+        else:
+            msg1 = Twist()
+            msg1.angular.z = 0.3
+            self.publisher_.publish(msg1)
+            self.get_logger().info(f'Searching for \{self.find_color\}...')
+            self.consec_ready = 0
+        
+        # Move on to next phase if facing the color 20 iterations in a row (means ready)
+        if self.consec_ready >= 20:
+            self.next_phase()
+            self.get_logger().info(f'phase0_find_color complete! Moving on to phase 1...')
+            self.consec_ready = 0
+
+        # show debugging window
+        cv2.imshow("window", image)
+        cv2.waitKey(3)
+    
+    def phase1_to_color(self, msg):
+        # converts the incoming ROS message to OpenCV format and HSV
+        image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+
+        # pink
+        if self.find_color == "pink":
+            lower_color = np.array([140,  40,  80], dtype=np.uint8)
+            upper_color = np.array([179, 255, 255], dtype=np.uint8)
+        # green
+        elif self.find_color == "green":
+            lower_color = np.array([35, 90, 110])
+            upper_color = np.array([41, 140, 210])
+        # blue
+        elif self.find_color == "blue":
+            lower_color = np.array([93.64, 56.98, 146.35])
+            upper_color = np.array([99.93, 227.83, 161.65])
+
+        # erase all pixels that aren't that color
+        mask = cv2.inRange(hsv, lower_color, upper_color)
+
+        # limit the search to slice out the top 1/4
+        h, w, d = image.shape
+        search_top = int(h/4)
+        search_bot = h
+        mask[0:search_top, 0:w] = 0
+        mask[search_bot:h, 0:w] = 0
+
+        # draw a rectangle around the search box
+        cv2.rectangle(image, (0, search_top), (w, search_bot), (0, 0, 0), 1)
+
+        # calculate moments to find the center of color pixels
+        M = cv2.moments(mask)
+
+        # if there are any pixels found
+        if M['m00'] > 0:
+            cx = int(M['m10']/M['m00'])
+            cy = int(M['m01']/M['m00'])
+
+            # draw a red circle at the center
+            cv2.circle(image, (cx, cy), 20, (0, 0, 255), -1)
+
+            # Turn towards the color
+            err_x = cx - (w // 2)
+            msg1 = Twist()
+            msg1.angular.z = -0.004 * err_x
+            msg1.linear.x = (self.front_dist - 0.35) / 2.5
+
+            self.publisher_.publish(msg1)
+            self.get_logger().info(f'Moving towards \{self.find_color\} with speed \{msg1.linear.x\}! Distance: \{self.front_dist\}.')
+            # Increment consecutive ready if low enough error
+            if abs(msg1.linear.x) <= 0.02:
+                self.consec_ready += 1
+        # else, we keep turning until we find something
+        else:
+            msg1 = Twist()
+            msg1.angular.z = 0.3
+            self.publisher_.publish(msg1)
+            self.get_logger().info(f'Searching for {self.find_color}...')
+            self.consec_ready = 0
+        
+        # Move on to next phase if facing the color 20 iterations in a row (means ready)
+        if self.consec_ready >= 20:
+            self.next_phase()
+            self.get_logger().info(f'phase1_to_color complete! Moving on to phase 2...')
+            self.consec_ready = 0
+
+        # show debugging window
+        cv2.imshow("window", image)
+        cv2.waitKey(3)
+    
+    def next_phase(self):
+        self.phase = self.phase + 1
+    
+    def back_phase(self):
+        self.phase = self.phase - 1
 
 def main(args=None):
     rclpy.init(args=args)
-    node = FindCylinder()
+    execute_policy_node = ExecutePolicy()
     try:
-        rclpy.spin(node)
+        rclpy.spin(execute_policy_node)
     except KeyboardInterrupt:
         pass
     finally:
-        node.destroy_node()
+        execute_policy_node.destroy_node()
+        cv2.destroyAllWindows()
         rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
-```
 """
 
-        self.system_prompt = f"""
-You are a Robot Planner using ROS 2.
-GOAL: {goal_description}.
-
-1. **You are encouraged to ask for extra information whenever you're unsure how to achieve the goal**:
-   - Describe your problem in one sentence and ask for help in another.
-   - Prioritize asking high-level nav planning and problem-solving questions, only ask specific low-level questions if absolutely necessary.
-
-2. If you think you have enough information from the observations and human hints:
-   - Output Python code, and make sure you use code fences: `python ...`.
-   - Use this template:
-{self.code_template}
-   - When generating code, ensure you make only necessary efforts to accomplish the goal, each state should have a time limit such as 60 seconds.
-
-You have access to the following helper functions (imported via `from helpers import *`):
-
-1. move_forward(cmd_vel_pub, speed=0.2)
-   - Sends a single Twist command to move the robot forward with linear.x = speed and angular.z = 0.0.
-   - Non-blocking: call this from a timer or loop at a fixed rate; the caller is responsible for timing/duration.
-
-2. rotate(cmd_vel_pub, angular_speed=0.5, clockwise=True)
-   - Sends a single Twist command to rotate in place.
-   - angular.z = -abs(angular_speed) if clockwise, else +abs(angular_speed).
-   - Non-blocking: call repeatedly for as long as you want to rotate.
-
-3. stop(cmd_vel_pub)
-   - Sends a Twist command with linear.x = 0.0 and angular.z = 0.0 to stop the robot.
-
-4. find_colored_blob(cv_image, lower_hsv, upper_hsv, min_area=200) -> (found, cx, cy, area)
-   - Takes a BGR cv2 image and HSV bounds and returns whether a blob was found.
-   - If found is True, cx and cy are the centroid pixel coordinates of the largest blob, and area is its contour area.
-   - If no valid blob is found, returns (False, None, None, 0.0).
-
-5. rotate_and_search_step(cmd_vel_pub, get_latest_image, lower_hsv, upper_hsv,
-                          angular_speed=0.4, clockwise=False, min_area=200, active=True)
-   - ONE CONTROL STEP of rotating in place while searching for a colored object.
-   - If active is True, publishes a rotation Twist and looks at the latest image from get_latest_image().
-   - Returns (found, cx, area):
-       * found: True if the target color blob is detected in this step.
-       * cx: horizontal pixel coordinate of the blob center (or None).
-       * area: blob area (0 if not found).
-   - Non-blocking: caller must manage timing, number of steps, and state transitions.
-
-6. approach_colored_object_step(cmd_vel_pub, get_latest_image, lower_hsv, upper_hsv,
-                                image_width, target_area=20000, linear_speed=0.18,
-                                k_angular=0.004, min_area=200, active=True)
-   - ONE CONTROL STEP of approaching a colored object while trying to keep it centered in the image.
-   - The camera resolution is 250x250 pixels and a target area of 20000 roughly means a cylinder being 0.8 meters away.
-   - Use a smaller min_area such as 10 when looking for smaller objects such as a colored tape.
-   - Uses the latest camera image to find the target blob and computes a Twist with forward motion plus
-     an angular correction proportional to horizontal pixel error.
-   - Returns (reached, found, area):
-       * reached: True if area >= target_area on this step (object is close enough).
-       * found: True if the target blob is visible in this step.
-       * area: current blob area (0 if not found).
-   - Non-blocking: caller must handle timeouts, stopping conditions, and switching states.
-
-7. get_lidar_ranges(scan_msg, max_val=10.0, min_safe=0.15) -> list
-   - Returns a processed list of LIDAR distances from the raw LaserScan message.
-   - Replaces values that are infinite or below min_safe (0.15 m) with max_val (default 10.0).
-   - The resulting list typically contains 1080 values, where index 0 is the robot's Right and index 270 is Front.
-
-8. get_nearest_front_distance(scan_msg, error=30) -> float
-   - Finds the closest object in a specific slice directly in front of the robot.
-   - Scans indices centered at 270 (Front) with a margin of +/- error (default 30 indices).
-   - Returns the minimum valid distance found; returns 10.0 if all readings are infinite or too close (noise).
-
-9. get_scan_range_by_degree(scan_msg, start_degree, end_degree, max_val=10.0, min_safe=0.15) -> list
-   - Returns a cleaned list of LIDAR distances for a specific angular range (in degrees).
-   - Maps 0 degrees to the robot's Right side, increasing counter-clockwise (approx. 3 indices per degree).
-   - Applies the same cleaning logic as get_lidar_ranges to handle infinite or noisy readings.
-
-Important constraints:
-- These helper functions do NOT handle time.sleep or durations internally; they are single-step controllers.
-- In your generated code, use ROS 2 timers or a main loop to call these functions at a fixed rate and implement
-  higher-level behaviors (search, approach, etc.) as a simple state machine.
-- When using lidar scans, make sure to ignore invalid readings outside of [0.2, 10.0] meters, such as NaN, inf or -1.0.
-
-Color detection helpers:
-- You are given loose HSV bounds for several HTML4 color names, suitable for OpenCV-based color detection.
-- HSV is in OpenCV format: H in [0, 179], S in [0, 255], V in [0, 255].
-- You can use these bounds directly when calling find_colored_blob, rotate_and_search_step, or
-  approach_colored_object_step.
-
-```python
-COLOR_BOUNDS = {{
-    'aqua':    {{'lower': (70, 205, 205), 'upper': (110, 255, 255)}},
-    'black':   {{'lower': (0,   0,   0),  'upper': (180, 255, 80)}},
-    'blue':    {{'lower': (100, 205, 205),'upper': (140, 255, 255)}},
-    'fuchsia': {{'lower': (130, 205, 205),'upper': (170, 255, 255)}},
-    'green':   {{'lower': (40,  105,   0),'upper': (80,  255, 178)}},
-    'gray':    {{'lower': (0,   0,    0),'upper': (180, 130, 178)}},
-    'lime':    {{'lower': (40,  205, 205),'upper': (80,  255, 255)}},
-    'maroon':  {{'lower': (0,   105,   0),'upper': (20,  255, 178)}},
-    'navy':    {{'lower': (100, 105,   0),'upper': (140, 255, 178)}},
-    'olive':   {{'lower': (10,  105,   0),'upper': (50,  255, 178)}},
-    'purple':  {{'lower': (130, 105,   0),'upper': (170, 255, 178)}},
-    'red':     {{'lower': (0,   205, 205),'upper': (20,  255, 255)}},
-    'silver':  {{'lower': (0,   0,   42), 'upper': (180, 130, 255)}},
-    'teal':    {{'lower': (70,  105,   0),'upper': (110, 255, 178)}},
-    'white':   {{'lower': (0,   0,  105), 'upper': (180, 130, 255)}},
-    'yellow':  {{'lower': (10,  205, 205),'upper': (60,  255, 255)}},
-    "orange":  {{"lower": (4, 45, 232), "upper": (10, 217, 247)}},
-}}
-```
-"""
-
-        self.history.append({"role": "system", "content": self.system_prompt})
+        self.history.append({"role": "system", "content": self.system_prompt},
+                            {"role": "user", "content": self.goal_description})
 
     def think(self, ego_image_b64, human_hint=None):
         messages = []
