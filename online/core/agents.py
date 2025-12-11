@@ -66,28 +66,51 @@ class PlannerAgent:
         self.history = []
         self.goal_description = goal_description
         self.system_prompt = """
-        You are generating code for a turtlebot4 running ros2 using Python.
-                 Do not generate anything else besides Python. You will have access to 3 robot messages.
-                 You need to use environment variables to choose the topic names. which are: 
-                    - Subscribe to RGB Camera with topic os.getenv('IMAGE_TOPIC')
-                    - Subscribe to lidar with topic os.getenv('LIDAR_TOPIC')
-                    - Publish to robot movement with os.getenv('CMD_VEL_TOPIC')
-                Note that the lidar values have 1080 values, with 0 on the right inreasing counter clockwise, just like a unit circle. 
-                This means that the front direction is index 270 of the data range, for example. 
-                Also there are objects near the lidar that are part of the robot, so we should filter nearby values out. Only values > 0.15 for example.
+You are generating code for a turtlebot4 running ros2 using Python.
+    Do not generate anything else besides Python. You will have access to 3 robot messages.
+    You need to use environment variables to choose the topic names. which are: 
+    - Subscribe to RGB Camera with topic os.getenv('IMAGE_TOPIC')
+    - Subscribe to lidar with topic os.getenv('LIDAR_TOPIC')
+    - Publish to robot movement with os.getenv('CMD_VEL_TOPIC')
+Note that the lidar values have 1080 values, with 0 on the right inreasing counter clockwise, just like a unit circle. 
+This means that the front direction is index 270 of the data range, for example. 
+Also there are objects near the lidar that are part of the robot, so we should filter nearby values out. Only values > 0.15 for example.
 
-                Here is an example implementation of the imports and code formats that uses all three messages. 
-                Note that the robot is very sensitive. The example code breaks up the process into steps. 
-                First it aligns itself and confirms its aligned, then it moves towards the destination. 
-                There is real-world error and lag. Thus, if it didn't first align properly and instead moved immediately towards the color, the result
-                would result in missing the target. Therefore, your code should assume these errors, and make sure your solutions breaks it down into 
-                steps and verifies precision like the example script. 
+Here is an example implementation of the imports and code formats that uses all three messages. 
+Note that the robot is very sensitive. The example code breaks up the process into steps. 
+First it aligns itself and confirms its aligned, then it moves towards the destination. 
+There is real-world error and lag. Thus, if it didn't first align properly and instead moved immediately towards the color, the result
+would result in missing the target. Therefore, your code should assume these errors, and make sure your solutions breaks it down into 
+steps and verifies precision like the example script. 
 
-                For every subsequent task we need to evaluate the success of the task completion. 
-                If you complete the task (for example, found and reached a blue cylinder) print "TASK_RESULT:SUCCESS" using self.get_logger().info(''). 
-                If the task cannot be completed within a reasonable amount of time (for example, cannot find a blue cylinder within 20 seconds), 
-                print "TASK_RESULT:FAIL" using self.get_logger().info('') and stop. 
+For every subsequent task we need to evaluate the success of the task completion. 
+If you complete the task (for example, found and reached a blue cylinder) print "TASK_RESULT:SUCCESS" using self.get_logger().info(''). 
+If the task cannot be completed within a reasonable amount of time (for example, cannot find a blue cylinder within 20 seconds), 
+print "TASK_RESULT:FAIL" using self.get_logger().info('') and stop. 
 
+Always generate Python code in a code block.
+
+Example color ranges are:
+
+"aqua": {"lower": (70, 205, 205), "upper": (110, 255, 255)},
+"black": {"lower": (0, 0, 0), "upper": (180, 255, 80)},
+"blue": {"lower": (100, 205, 205), "upper": (140, 255, 255)},
+"fuchsia": {"lower": (130, 205, 205), "upper": (170, 255, 255)},
+"green": {"lower": (40, 105, 0), "upper": (80, 255, 178)},
+"gray": {"lower": (0, 0, 0), "upper": (180, 130, 178)},
+"lime": {"lower": (40, 205, 205), "upper": (80, 255, 255)},
+"maroon": {"lower": (0, 105, 0), "upper": (20, 255, 178)},
+"navy": {"lower": (100, 105, 0), "upper": (140, 255, 178)},
+"olive": {"lower": (10, 105, 0), "upper": (50, 255, 178)},
+"purple": {"lower": (130, 105, 0), "upper": (170, 255, 178)},
+"red": {"lower": (0, 205, 205), "upper": (20, 255, 255)},
+"silver": {"lower": (0, 0, 42), "upper": (180, 130, 255)},
+"teal": {"lower": (70, 105, 0), "upper": (110, 255, 178)},
+"white": {"lower": (0, 0, 105), "upper": (180, 130, 255)},
+"yellow": {"lower": (10, 205, 205), "upper": (60, 255, 255)},
+"orange": {"lower": (4, 45, 232), "upper": (10, 217, 247)}
+
+```
 import rclpy
 from rclpy.node import Node
 
@@ -324,10 +347,11 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
+```
 """
 
-        self.history.append({"role": "system", "content": self.system_prompt},
-                            {"role": "user", "content": self.goal_description})
+        self.history.extend([{"role": "system", "content": self.system_prompt},
+                            {"role": "user", "content": self.goal_description}])
 
     def think(self, ego_image_b64, human_hint=None):
         messages = []
