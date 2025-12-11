@@ -23,6 +23,7 @@ from .core.executor import execute_ros2_code
 # Configuration via Environment Variables
 # ------------------------------------------------------------------
 from dotenv import load_dotenv
+
 load_dotenv()
 
 CMD_VEL_TOPIC = os.getenv("CMD_VEL_TOPIC", "/cmd_vel")
@@ -32,9 +33,7 @@ ROBOT_FRONT_INDEX = float(os.getenv("ROBOT_FRONT_INDEX", "0.0"))  # in radians
 
 
 class InteractivePlannerNode(Node):
-    def __init__(
-        self, goal_description: str, scene_id: str = "real", run_idx: int = 0
-    ):
+    def __init__(self, goal_description: str, scene_id: str = "real", run_idx: int = 0):
         super().__init__("interactive_planner_node")
 
         self.scene_id = scene_id
@@ -100,7 +99,7 @@ class InteractivePlannerNode(Node):
         self.get_logger().info("--- Starting Real World Episode ---")
         self.get_logger().info("Press Ctrl+C in terminal to abort if needed.")
 
-        while rclpy.ok() and not self.episode_done:
+        while not self.episode_done:
 
             if self.round_idx >= MAX_ROUNDS:
                 self.get_logger().info("[PLANNER] Max rounds reached.")
@@ -171,9 +170,12 @@ class InteractivePlannerNode(Node):
                     self.get_logger().error(f"Execution failed: {e}")
                     self.hint = f"The previous code failed to execute with error: {e}"
 
-                # Safety Stop
-                stop_msg = Twist()
-                self.cmd_pub.publish(stop_msg)
+                try:
+                    # Safety Stop
+                    stop_msg = Twist()
+                    self.cmd_pub.publish(stop_msg)
+                except Exception:
+                    pass
 
                 self.hint = self.human.get_hint(
                     top_down_b64=None,

@@ -114,7 +114,7 @@ Example color ranges are:
 "silver": {"lower": (0, 0, 42), "upper": (180, 130, 255)},
 "teal": {"lower": (70, 105, 0), "upper": (110, 255, 178)},
 "white": {"lower": (0, 0, 105), "upper": (180, 130, 255)},
-"yellow": {"lower": (15, 80, 80), "upper": (50, 255, 255)},
+"yellow": {"lower": (15, 100, 100), "upper": (50, 255, 255)},
 "orange": {"lower": (4, 45, 232), "upper": (10, 217, 247)}
 
 Example Code:
