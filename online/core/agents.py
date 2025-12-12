@@ -401,7 +401,6 @@ if __name__ == '__main__':
             messages.append({"role": "user", "content": human_hint})
             self.history.append({"role": "user", "content": human_hint})
         else:
-            # Differentiate formatting between standard ChatCompletions and custom client
             if not MODEL.startswith("gpt-"):
                 # Standard Chat Completion Format (vLLM/OpenAI Standard)
                 msg = {

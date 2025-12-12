@@ -37,26 +37,20 @@ class ScanOdomInspector(Node):
         num_points = len(msg.ranges)
         stamp = msg.header.stamp
 
-        # Example: get the front measurement (approx middle index)
+        # Get the front measurement (approx middle index)
         if num_points > 0:
             mid_index = 1080 // 4
             front_distance = msg.ranges[mid_index]
         else:
             front_distance = float('nan')
 
-        # Print a small summary (not spamming everything)
+        # Print a small summary
         self.get_logger().info(
             f"[LaserScan] t={stamp.sec}.{stamp.nanosec:09d}  "
             f"points={num_points}  "
             f"angle_min={msg.angle_min:.3f}  angle_max={msg.angle_max:.3f}  "
             f"front_dist={front_distance:.3f} m"
         )
-
-        # If you want to inspect a few specific rays, uncomment:
-        # for i in range(0, num_points, max(1, num_points // 10)):
-        #     angle = msg.angle_min + i * msg.angle_increment
-        #     r = msg.ranges[i]
-        #     self.get_logger().info(f"  index={i:3d}, angle={angle:.3f} rad, range={r:.3f} m")
 
     # ---- Odometry callback ----
     def odom_callback(self, msg: Odometry):

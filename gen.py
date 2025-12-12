@@ -1,4 +1,3 @@
-# random_cylinders_sdg_with_constraints.py
 # Static baked scenes with cylinders and a randomized TurtleBot4 pose
 # Includes constraints: No objects in exclusion zone, no uniform colors.
 
@@ -319,7 +318,7 @@ with rep.trigger.on_frame():
 
 
 # ----------------------------------------
-# Main Loop (Filtered)
+# Main Loop
 # ----------------------------------------
 valid_frames_generated = 0
 target_frames = CONFIG["num_frames"]
