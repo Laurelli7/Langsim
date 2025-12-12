@@ -13,6 +13,10 @@ We successfully implemented a system where a robot can interpret a high-level co
 * **ROS 2 Execution Environment:** The generated code is executed on the robot (TurtleBot 4), sending commands to topics like `/cmd_vel`.
 * **Simulation & Offline Learning:** NVIDIA Isaac Sim and Replicator were used to generate synthetic datasets of Python scripts to fine-tune the model for spatial reasoning and interactiveness.
 
+![behind_wall](https://github.com/user-attachments/assets/eb40b5ed-fb50-4a83-bb8e-00338669ef58)
+
+Finding the cylinder behind the wall (second round, after human feedback, GPT-4o)
+
 ## Research Gap
 
 Recent research in robot planning has shifted from static primitives to dynamic code generation (Liang et al., 2023) and end-to-end Vision-Language-Action (VLA) models (Zitkovich et al., 2023). While code generation offers interpretability, early approaches lacked direct visual grounding, often relying heavily on text-only prompts. Conversely, monolithic VLAs integrate vision but suffer from high inference latency and "black-box" opacity. Furthermore, while agents like *Voyager* demonstrated that iterative code refinement works in gaming environments (Wang et al., 2023), and frameworks like *KnowNo* enabled robots to ask for help before acting (Ren et al., 2024), there remains a gap in effectively using human feedback to correct physical navigation failures in real-time. Although recent work like *RoboCodeX* has begun to explore multimodal code generation (Mu et al., 2024), significant challenges remain in efficient human collaboration.
@@ -214,3 +218,20 @@ VLM inference is currently slow and resource-intensive, with a single inference 
 * Human-in-the-loop multi-step reasoning really works. Allowing a human to step in during failure cases and provide corrective, high-level guidance turned out to be extremely powerful. Instead of hard-coding recovery behaviors, the robot can revise its plan through natural language and keep going. I can imagine bringin my robot to my friend’s house and still cook dinner for us, just by explaining where the utensils are. That kind of interaction is efficient, intuitive, and much closer to how humans collaborate.
 
 * This project also highlights the potential of combining high-level planning with low-level control, and also opens up the door to multi-agent systems, where different agents have different views, skills, or responsibilities but work together on the same task. This feels like a strong precursor for more scalable robot intelligence rather than relying on a single monolithic model such as a VLA.
+
+## Demo
+
+https://github.com/user-attachments/assets/a895cd48-ec20-4304-8487-a7cf26690ae9
+
+Spin in circles (Qwen3-VL-8B finetuned)
+
+
+https://github.com/user-attachments/assets/0481929b-25ca-4eec-83f5-cd2fe521cc6d
+
+Finding cylinder (Qwen3-VL-8B finetuned)
+
+
+https://github.com/user-attachments/assets/d1ebf529-ab6f-4ebf-b06f-888fc5a52054
+
+Finding cylinder behind the wall (Isaac Sim, GPT-4o)
+
