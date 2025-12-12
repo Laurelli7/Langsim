@@ -29,6 +29,10 @@ colcon_ws/log/
 
 # Generated data
 scene_snapshots/
+scene_snapshots_bak/
 _out_random_cylinders/
 dataset_logs
 code_logs
+qwen3-vl-robot-planner
+.env
+data

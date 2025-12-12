@@ -1,118 +1,216 @@
-# VLM Robot Planning Pipeline
+# Langsim: Final Writeup
 
-This repository contains an end-to-end pipeline for generating multimodal training data for vision-language robot navigation tasks. The system automates the creation of training environments, simulates a "Human Oracle" to guide the robot, and records the robot's planning execution for future Large Language Model (LLM) fine-tuning.
+## Project Description
 
-## 1\. Pipeline Overview
+Langsim is a human-VLM (Vision-Language Model) collaboration framework designed to enable natural language planning for ROS 2 robots. The goal of this project is to lower the barrier for human-robot interaction by allowing users to control a robot, such as a TurtleBot 4, using natural language or voice commands. This project is particularly interesting because it leverages the code generation and transformation capabilities of Multimodal LLMs to analyze visual and text inputs and dynamically plan tasks, rather than relying on static action primitives.
 
-The pipeline operates in two distinct phases:
+We successfully implemented a system where a robot can interpret a high-level command like *"Find and move to the blue cylinder."* If the robot fails (e.g., returns `TASK_RESULT:FAIL`), the framework supports human-in-the-loop guidance. A user can provide a corrective prompt, such as *"If you move to the pink cylinder first... you should be able to find and reach the blue cylinder,"* which allows the robot to update its plan and succeed.
 
-1.  **Offline Scene Baking:** We programmatically generate randomized USD stages containing a TurtleBot4, random cylindrical targets, and ground truth metadata. These scenes are "baked" (dynamic graphs stripped) to ensure deterministic loading during simulation.
-2.  **Online Data Generation (The "Game"):** An autonomous loop where two AI Agents interact:
-      * **Human Oracle:** Has a top-down "God view" of the map and the target. It gives natural language hints to the robot.
-      * **Planner Agent:** Acts as the robot. It sees only the ego-centric camera view and the human's hint. It outputs executable ROS 2 code to move the robot.
+### Main Components
 
-## 2\. File Descriptions
+* **Human Supervisor (Oracle):** Provides natural language guidance, queries, and ground truth information (e.g., map, target).
+* **VLM-Based Planner Agent:** Acts as the reasoning layer. It decides whether to "Ask" for help or "Code" a solution. It integrates visual perception (egocentric RGB images) and robot state to generate Python code.
+* **ROS 2 Execution Environment:** The generated code is executed on the robot (TurtleBot 4), sending commands to topics like `/cmd_vel`.
+* **Simulation & Offline Learning:** NVIDIA Isaac Sim and Replicator were used to generate synthetic datasets of Python scripts to fine-tune the model for spatial reasoning and interactiveness.
 
-### `gen.py`
+## Research Gap
 
-**The Scene Baker**
-This script generates the dataset of environments used for training.
+Recent research in robot planning has shifted from static primitives to dynamic code generation (Liang et al., 2023) and end-to-end Vision-Language-Action (VLA) models (Zitkovich et al., 2023). While code generation offers interpretability, early approaches lacked direct visual grounding, often relying heavily on text-only prompts. Conversely, monolithic VLAs integrate vision but suffer from high inference latency and "black-box" opacity. Furthermore, while agents like *Voyager* demonstrated that iterative code refinement works in gaming environments (Wang et al., 2023), and frameworks like *KnowNo* enabled robots to ask for help before acting (Ren et al., 2024), there remains a gap in effectively using human feedback to correct physical navigation failures in real-time. Although recent work like *RoboCodeX* has begun to explore multimodal code generation (Mu et al., 2024), significant challenges remain in efficient human collaboration.
 
-  * **Function:** Loads a base TurtleBot4 USD, spawns cylinders in random locations with random colors, and randomizes the robot's pose.
-  * **Key Feature:** It performs a "Snapshot & Strip" operation. It runs Isaac Replicator for one frame to randomize the scene, exports the stage to a new `.usd` file, and then **strips the Replicator/OmniGraph nodes**.
-  * **Output:** Static `.usd` files (scenes) and companion `.json` files (ground truth locations/colors).
+Langsim addresses these limitations by proposing a modular human-VLM collaboration framework for ROS 2. Unlike the text-only limitations of Liang et al. (2023) or the heavy computational cost of Zitkovich et al. (2023), we fine-tune a lightweight VLM to generate Python code with access to egocentric vision and human feedback. Our primary contribution is a robust **human-in-the-loop correction mechanism**: rather than just asking for help *before* a task based on external probabilities, Langsim uses multi-turn interactions data to help planner agents learn to ask for help when it is needed, which the agent then uses to dynamically rewrite its code and recover. The research opens up new possibilities for efficient human-robot collaboration, and calls for future work in multi-agent robot planning frameworks.
 
-### `langsim.py`
+### References
 
-**The Simulation Loop (Online Generation)**
-The main entry point for data collection. It loads a baked scene and orchestrates the interaction between the Agents.
+Liang, J., Huang, W., Xia, F., Xu, P., Hausman, K., Ichter, B., ... & Zeng, A. (2022). Code as policies: Language model programs for embodied control. arXiv preprint arXiv:2209.07753.
 
-  * **Agents:**
-      * **Oracle:** Receives a top-down image with a drawn arrow indicating robot pose. Uses GPT-4o to generate navigation instructions (e.g., "Turn left toward the blue cylinder").
-      * **Planner:** Receives the ego-centric robot view and the Oracle's text. Uses GPT-4o to generate **Python ROS 2 code**.
-  * **Execution:** The script extracts the Python code generated by the Planner, saves it to a temporary file, and executes it via `subprocess` to actually move the robot in the sim.
-  * **Logging:** Saves every interaction (images, prompts, generated code) to `dataset_logs/`.
+Mu, Y., Chen, J., Zhang, Q., Chen, S., Yu, Q., Ge, C., ... & Luo, P. (2024). Robocodex: Multimodal code generation for robotic behavior synthesis. arXiv preprint arXiv:2402.16117.
 
-### `camera.py`
+Ren, A. Z., Dixit, A., Bodrova, A., Singh, S., Tu, S., Brown, N., ... & Majumdar, A. (2023). Robots that ask for help: Uncertainty alignment for large language model planners. arXiv preprint arXiv:2307.01928.
 
-**Sensor Utility: Vision**
-A configuration script to attach and initialize the camera sensors on the robot.
+Wang, G., Xie, Y., Jiang, Y., Mandlekar, A., Xiao, C., Zhu, Y., ... & Anandkumar, A. (2023). Voyager: An open-ended embodied agent with large language models. arXiv preprint arXiv:2305.16291.
 
-  * **Function:** Wraps the USD prim path (e.g., `/World/turtlebot4/oakd_link/Camera`) with Isaac Sim's `Camera` class.
-  * **ROS 2 Bridge:** Sets up the Action Graphs required to publish:
-      * RGB Images (`/camera_rgb`)
-      * Depth Maps (`/camera_depth`)
-      * Camera Info (intrinsics)
-      * TF (Transforms)
+Zitkovich, B., Yu, T., Xu, S., Xu, P., Xiao, T., Xia, F., ... & Han, K. (2023, December). Rt-2: Vision-language-action models transfer web knowledge to robotic control. In Conference on Robot Learning (pp. 2165-2183). PMLR.
 
-### `lidar.py`
+## System Architecture
 
-**Sensor Utility: Depth/Scan**
-A configuration script to attach and initialize the Lidar sensor.
+We implemented a complete pipeline for training and deploying a VLM-based robot planner. The architecture consists of four major components:
 
-  * **Function:** Creates a custom OmniGraph to bridge PhysX Lidar data to ROS 2.
-  * **ROS 2 Bridge:** Publishes standard `/scan` (LaserScan) messages used for obstacle avoidance and mapping logic.
+1.  **Online Data Generation with Simulation**
+    *   **Code**: `online/sim.py`, `online/planner.py`, `gen.py`
+    *   **Algorithm**: We leverage [NVIDIA Isaac Sim](https://developer.nvidia.com/isaac/sim) and `omni.replicator` to procedurally generate training environments. 
+        *   `gen.py`: Only handles the *static scene generation*, spawning scenes with randomized robot poses and obstacles (cylinders of diverse colors) and validating them. The current implementation is limited to the `simple_room` scene, but it has the potential to be extended to more complex environments such as the [Interior Agent Dataset](https://huggingface.co/datasets/spatialverse/InteriorAgent).
+        *   `online/sim.py`: Starts the Isaac Sim application and loads the generated USD stages.
+        *   `online/planner.py`: Spins up the LLM agents to randomly pick a cylinder target, guides the robot to the goal, and logs the dialogue and actions as training data. This node also manages simulation state (scene loading and resets) via the [Isaac Sim ROS 2 Simulation Control Extension](https://docs.isaacsim.omniverse.nvidia.com/5.1.0/ros2_tutorials/tutorial_ros2_simulation_control.html).
 
-## 3\. Usage Guide
+2.  **Offline Data Generation & Validation**
+    *   **Code**: `offline/`
+    *   **Algorithm**: To scale up training, we also deploy code generation for a couple simple tasks such as spin in circles, move towards the wall, follow the person to generate a large dataset of valid navigation scenarios, having the assumption that large models can do these well enough so that we do not need to validate them in simulation before using them for training.
 
-### Prerequisites
+3.  **QLoRA VLM SFT Fine-tuning**
+    *   **Code**: `vlm.ipynb`, `vlm_sft_dataset.json`
+    *   **Algorithm**: We fine-tune a Vision-Language Model (specifically Qwen3-VL-8B via `start_vlm.sh`) on multi-turn dialogue data. Using **QLoRA** (Quantized Low-Rank Adaptation), we adapt the model to Reason, Plan, and Code. The model is trained to have the capacity to dynamically decide when to output executable Python code, and when to ask clarifying questions when the task is ambiguous.
 
-  * **Isaac Sim 4.0+**
-  * **ROS 2 Humble/Foxy** installed and sourced in the environment.
-  * **OpenAI API Key** (for GPT-4o).
+4.  **Inference Pipeline**
+    *   **Code**: `online/demo.py`, `start_vlm.sh`
+    *   **Algorithm**: The inference system is distributed:
+        *   **Robot Node (`online/demo.py`)**: Run on the edge (NoMachine in our case). It subscribes to sensor topics (Lidar, Camera), manages the "Ask-Code-Act" loop, and executes the generated Python code using a Python subprocess. The planner agent and human agent can both connect to any OpenAI-compatible API endpoint. In the case of our demo, we use the Qwen3-VL-8B model as planner, and real-time human input as the human agent.
+        *   **VLM Server**: The planning VLM agent is hosted remotely on one of the GPU nodes on the Midway cluster. We serve the model using the efficient `vllm` framework (commands in `start_vlm.sh`) and expose the API endpoint to the NoMachine session via SSH port forwarding (commands in `vlm_proxy.sh`).
 
-### Step 1: Generate Scenes (Offline)
+## ROS Node Diagram
 
-Run the randomizer to create a batch of 50 static scenarios.
+The following diagram highlights our overall system architecture:
+
+```mermaid
+graph TD
+    %% Hardware / Simulation Topics
+    subgraph "Robot / Simulation"
+        Camera(/camera_rgb)
+        Lidar(/scan)
+        Odom(/odom)
+        CmdVel(/cmd_vel)
+    end
+
+    %% Main Logic
+    subgraph "System Architecture"
+        PlannerNode("Robot Planner<br/>(demo.py)")
+        ExecutionNode("Code Execution Process<br/>(Subprocess)")
+    end
+
+    %% External
+    Human(Human Oracle)
+
+    %% Connections
+    
+    %% Planner Inputs
+    Camera -->|Image| PlannerNode
+    Human -->|Feedback / Instruction| PlannerNode
+    
+    %% Planner -> Execution
+    PlannerNode -->|Generated Python Code| ExecutionNode
+    ExecutionNode -->|Execution Logs / Status| PlannerNode
+
+    %% Execution Inputs/Outputs
+    Camera -->|Vistual Data| ExecutionNode
+    Lidar -->|Scan Data| ExecutionNode
+    Odom -->|Odometry| ExecutionNode
+    ExecutionNode -->|Velocity Command| CmdVel
+```
+
+## Execution
+
+### 1. Online Data Generation
+
+Isaac Sim is built with Python 3.11. In order for our planner agent to access the robot via a working rclpy and hence the ROS2 Bridge, we manually built **ROS 2 Jazzy** with Python 3.11 support. You must source this custom build before starting the simulation.
+
+**Terminal 1 (Simulation):**
 
 ```bash
-# Ensure you are in the Isaac Sim python environment
-./python.sh gen.py
+# Source custom ROS 2 Jazzy built for Python 3.11
+source ~/ros2_jazzy/install/setup.bash
+
+# Navigate to project root
+cd ~/langsim
+
+# Start the simulation node
+~/isaac-sim/python.sh -m online.sim
 ```
 
-*Output:* Checks `scene_snapshots/` for `scene_0000.usd`, `scene_0000_gt.json`, etc.
+**Terminal 2 (Planner / Data Gen):**
 
-### Step 2: Run Data Collection (Online)
-
-Set your environment variables and run the generation loop.
+In a separate terminal, we run the planner logic using the system ROS 2 Jazzy installation. This controls the simulation scenes and runs the data collection loop.
 
 ```bash
-export OPENAI_API_KEY="sk-..."
-export TOPIC_CMD_VEL="/cmd_vel"
+# Source official ROS 2 Jazzy
+source /opt/ros2/jazzy/setup.bash
 
-# Run the simulation app
-./python.sh langsim.py
+# Start the planner and simulation control interface using system Python and system ROS 2 Distribution
+python3 -m online.planner
 ```
 
-*Output:* The robot will load a scene, ask for help, receive a hint, generate code, and move. Logs are saved to `dataset_logs/`.
+*Note: This process uses `simulation_interfaces` to automatically load scenes and reset the simulation state between runs.*
 
-## 4\. Dataset Output Format
+### 2. VLM Finetuning
 
-The `langsim.py` script produces a `log_{id}.json` file for every episode containing the chain-of-thought data required for fine-tuning:
+We use the data collected from the previous step to fine-tune **Qwen3-VL-8B** using QLoRA. The process is documented in `vlm.ipynb`.
 
-```json
-{
-  "scene": "0000",
-  "dialogue": [
-    {
-      "round": 0,
-      "robot_pos": [1.2, -0.5, 0.0],
-      "planner_action": "ask",
-      "planner_content": "I see a wall. Where is the green cylinder?",
-      "human_hint": "Turn right 90 degrees, it is behind you."
-    },
-    {
-      "round": 1,
-      "robot_pos": [1.2, -0.5, 1.57],
-      "planner_action": "code",
-      "planner_content": "import rclpy... # logic to turn right",
-      "result": "Success"
-    }
-  ]
-}
+**Create SFT Dataset:**
+   The logs from the `dataset_logs` directory are processed into a JSON format suitable for Supervised Fine-Tuning (SFT). Each dialogue round is matched with its egocentric images and user-robot dialogues.
+
+**Configure LoRA Adapters:**
+   We load the model with 4-bit quantization and apply LoRA adapters to specific linear layers (`q_proj`, `k_proj`, `v_proj`, etc.) to enable efficient fine-tuning on consumer-grade hardware.
+
+   ```python
+   peft_config = LoraConfig(
+       r=16,
+       lora_alpha=16,
+       target_modules=["q_proj", "k_proj", "v_proj", "o_proj", ...],
+       lora_dropout=0.05,
+       bias="none",
+       task_type="CAUSAL_LM"
+   )
+   model = get_peft_model(model, peft_config)
+   ```
+
+**Run Training:**
+
+   We use the Hugging Face `Trainer` API to train the model on the `vlm_sft_dataset.json`. The training runs for 3 epochs with a small batch size, using gradient accumulation. The training was performed on a H100 GPU with 96GB of VRAM. The long context dialogues extends to at most 16k tokens and utilized more than 90% of the available GPU memory.
+
+   ```python
+   trainer = Trainer(
+       model=model,
+       train_dataset=train_dataset,
+       args=training_args,
+       data_collator=Qwen3VLDataCollator(),
+   )
+   trainer.train()
+   ```
+
+   The trained adapters are saved to `./qwen3-vl-robot-planner`.
+
+### 3. Inference
+
+To run the live inference demo with the trained VLM:
+
+**Start the Remote VLM Server:**
+
+(On the remote GPU cluster)
+```bash
+./start_vlm.sh
+```
+*Note: This script uses `vllm serve` with QLoRA adapters enabled.*
+
+**Establish Network Connection:**
+
+(On our local machine)
+```bash
+ssh -N -L 8000:localhost:8000 <username>@<midway_ip>
 ```
 
-## 5\. Future Work
+**Run the Robot Planner:**
 
-  * **Fine-tuning:** The logs in `dataset_logs` will be used to fine-tune a smaller VLM (e.g., LLaVA or a distilled model) to act as the Planner *without* needing GPT-4o or the Python code generation step (end-to-end control).
-  * **RL Integration:** Using the generated code snippets as "expert demonstrations" for Imitation Learning.
+(On our local machine with the system ROS 2 sourced)
+```bash
+python3 -m online.demo --goal "Find and move to the blue cylinder" --scene "test_run_1"
+```
+
+## Challenges
+
+We faced significant difficulties with the **NVIDIA Isaac Sim** and **Replicator** workflows. The Omniverse API is deprecated, and many community resources (such as documentation for camera projection matrices) have not been updated, making simulation setup harder than anticipated.
+
+Additionally, **human-in-the-loop data generation** proved to be slow and complicated, as the requirement for constant human presence bottlenecked the data collection process.
+
+VLM inference is currently slow and resource-intensive, with a single inference taking around 30 seconds on 8B Qwen and even more on remote LLM APIs. We might be able to reduce the latency by delegating low-level control to a VLA while the VLM handles high-level planning.
+
+## Future Work
+
+* Assess how human emotions affect model performance and exploratory incentives during collaboration.
+* Generalize this framework to more complicated tasks, such as multi-room navigation (logistics) and pick-and-place operations for medical or surgical applications.
+* Investigate the possibilities of a collaborative agentic framework in VLM robot manipulation, e.g., two agents with different camera access or different capabilities to perform the same task.
+
+## Takeaways
+
+* One takeaway is generalizability. A relatively small model, when fine-tuned on a very concrete task like finding a colored cylinder, can still generalize well to other simple behaviors (e.g., spinning, basic navigation, moving toward walls). This raises another interesting question: does finetuning on one task reduce or increase success rate of another?
+
+* Human-in-the-loop multi-step reasoning really works. Allowing a human to step in during failure cases and provide corrective, high-level guidance turned out to be extremely powerful. Instead of hard-coding recovery behaviors, the robot can revise its plan through natural language and keep going. I can imagine bringin my robot to my friend’s house and still cook dinner for us, just by explaining where the utensils are. That kind of interaction is efficient, intuitive, and much closer to how humans collaborate.
+
+* This project also highlights the potential of combining high-level planning with low-level control, and also opens up the door to multi-agent systems, where different agents have different views, skills, or responsibilities but work together on the same task. This feels like a strong precursor for more scalable robot intelligence rather than relying on a single monolithic model such as a VLA.

@@ -1,0 +1,1 @@
+VLLM_USE_DEEP_GEMM=0 vllm serve /project/jevans/tzhang3/models/Qwen3-VL-8B-Instruct/ --enable-lora --lora-modules adaptor_model=./qwen3-vl-robot-planner/checkpoint-15  --limit-mm-per-prompt.video 0   --async-scheduling --max_num_seqs=2
