@@ -4,7 +4,7 @@
 
 Langsim is a human-VLM (Vision-Language Model) collaboration framework designed to enable natural language planning for ROS 2 robots. The goal of this project is to lower the barrier for human-robot interaction by allowing users to control a robot, such as a TurtleBot 4, using natural language or voice commands. This project is particularly interesting because it leverages the code generation and transformation capabilities of Multimodal LLMs to analyze visual and text inputs and dynamically plan tasks, rather than relying on static action primitives.
 
-We successfully implemented a system where a robot can interpret a high-level command like *"Find and move to the blue cylinder."* If the robot fails (e.g., returns `TASK_RESULT:FAIL`), the framework supports human-in-the-loop guidance. A user can provide a corrective prompt, such as *"If you move to the pink cylinder first... you should be able to find and reach the blue cylinder,"* which allows the robot to update its plan and succeed.
+We finetune a Qwen3-VL-8B model (model checkpoints available on [HuggingFace](https://huggingface.co/DotIN13/qwen3-vl-robot-planner)) as a robot planner that can interpret a high-level command like *"Find and move to the blue cylinder."* If the robot fails (e.g., returns `TASK_RESULT:FAIL`), the framework supports human-in-the-loop guidance. A user can provide a corrective prompt, such as *"If you move to the pink cylinder first... you should be able to find and reach the blue cylinder,"* which allows the robot planner to update its plan, rewrite the code and recover.
 
 ### Main Components
 
